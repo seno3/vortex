@@ -12,10 +12,12 @@
     "@google/generative-ai": "^0.21.0",
     "@react-three/drei": "^9.115.0",
     "@react-three/fiber": "^8.17.10",
+    "@supabase/supabase-js": "^2.100.1",
     "mapbox-gl": "^3.9.4",
     "next": "14.2.29",
     "react": "^18",
     "react-dom": "^18",
+    "react-map-gl": "^8.1.0",
     "three": "^0.171.0"
   },
   "devDependencies": {
