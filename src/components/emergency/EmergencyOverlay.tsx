@@ -4,8 +4,6 @@ import type { Emergency } from '@/types';
 import CallButton from './CallButton';
 import EmergencyBadge from './EmergencyBadge';
 import EmergencyFeed from './EmergencyFeed';
-import EpicenterCluster from './EpicenterCluster';
-import DistanceBanner from './DistanceBanner';
 
 const KEYFRAMES = `
 @keyframes emergCallPulse {
@@ -103,27 +101,6 @@ export default function EmergencyOverlay({ emergency, visible }: EmergencyOverla
           <EmergencyFeed emergency={emergency} />
         </div>
 
-        {/* Center — Epicenter Cluster */}
-        <div style={{
-          position: 'absolute',
-          top: '50%', left: '50%',
-          transform: 'translate(-50%, -50%)',
-          zIndex: 102,
-          pointerEvents: 'none',
-        }}>
-          <EpicenterCluster emergency={emergency} />
-        </div>
-
-        {/* Bottom-center — Distance Banner */}
-        <div className="emerg-bc" style={{
-          position: 'absolute',
-          bottom: 32, left: '50%',
-          transform: 'translateX(-50%)',
-          zIndex: 102,
-          pointerEvents: 'none',
-        }}>
-          <DistanceBanner emergency={emergency} />
-        </div>
       </div>
     </>
   );

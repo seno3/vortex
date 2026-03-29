@@ -29,3 +29,18 @@ export async function getActiveEmergency(): Promise<IEmergency | null> {
   await connectDB();
   return getModel().findOne({ active: true }).sort({ createdAt: -1 }).lean() as Promise<IEmergency | null>;
 }
+
+export async function createEmergency(data: {
+  type: EmergencyType;
+  lat: number;
+  lng: number;
+  address?: string;
+}): Promise<IEmergency> {
+  await connectDB();
+  return getModel().create({ ...data, active: true });
+}
+
+export async function clearActiveEmergencies(): Promise<void> {
+  await connectDB();
+  await getModel().updateMany({ active: true }, { active: false });
+}

@@ -14,6 +14,7 @@ import BuildingPopup from '@/components/BuildingPopup';
 import FlareBubbles from '@/components/FlareBubbles';
 import ExitModal from '@/components/ExitModal';
 import EmergencyOverlay from '@/components/emergency/EmergencyOverlay';
+import EmergencyMarker from '@/components/emergency/EmergencyMarker';
 import SettingsModal from '@/components/settings/SettingsModal';
 import { useFlareRadiusM } from '@/hooks/useFlareRadiusM';
 import { useUserLocation } from '@/hooks/useUserLocation';
@@ -29,6 +30,75 @@ function topFlareCategory(tips: Tip[]): TipCategory {
     if (tips.some((t) => t.category === cat)) return cat;
   }
   return 'general_safety';
+}
+
+const EMERGENCY_TYPES = ['shooting', 'tornado', 'earthquake', 'fire'] as const;
+
+function DevEmergencyWidget({ lat, lng }: { lat: number; lng: number }) {
+  const [type, setType] = useState<typeof EMERGENCY_TYPES[number]>('shooting');
+  const [busy, setBusy] = useState(false);
+
+  const trigger = async () => {
+    setBusy(true);
+    await fetch('/api/emergencies', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type, lat, lng, address: 'Test Location' }),
+    }).catch(() => {});
+    setBusy(false);
+  };
+
+  const clear = async () => {
+    setBusy(true);
+    await fetch('/api/emergencies', { method: 'DELETE' }).catch(() => {});
+    setBusy(false);
+  };
+
+  return (
+    <div style={{
+      position: 'fixed', top: 16, left: 16, zIndex: 9998,
+      background: 'rgba(234,179,8,0.12)', backdropFilter: 'blur(12px)',
+      border: '1px solid rgba(234,179,8,0.4)', borderRadius: 10,
+      padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 8,
+      fontFamily: 'var(--font-mono, monospace)', fontSize: 10,
+      color: 'rgba(234,179,8,0.9)', letterSpacing: '0.08em',
+    }}>
+      <span style={{ opacity: 0.6 }}>DEV</span>
+      <select
+        value={type}
+        onChange={e => setType(e.target.value as typeof type)}
+        style={{
+          background: 'rgba(0,0,0,0.4)', border: '1px solid rgba(234,179,8,0.3)',
+          borderRadius: 4, color: 'rgba(234,179,8,0.9)', fontSize: 10,
+          fontFamily: 'inherit', padding: '2px 4px', cursor: 'pointer',
+        }}
+      >
+        {EMERGENCY_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+      </select>
+      <button
+        onClick={trigger} disabled={busy}
+        style={{
+          background: 'rgba(234,179,8,0.15)', border: '1px solid rgba(234,179,8,0.4)',
+          borderRadius: 4, color: 'rgba(234,179,8,0.9)', fontSize: 10,
+          fontFamily: 'inherit', padding: '3px 8px', cursor: busy ? 'default' : 'pointer',
+          letterSpacing: '0.08em', opacity: busy ? 0.5 : 1,
+        }}
+      >
+        TRIGGER
+      </button>
+      <button
+        onClick={clear} disabled={busy}
+        style={{
+          background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.15)',
+          borderRadius: 4, color: 'rgba(255,255,255,0.4)', fontSize: 10,
+          fontFamily: 'inherit', padding: '3px 8px', cursor: busy ? 'default' : 'pointer',
+          letterSpacing: '0.08em', opacity: busy ? 0.5 : 1,
+        }}
+      >
+        CLEAR
+      </button>
+    </div>
+  );
 }
 
 export default function DashboardPage() {
@@ -81,8 +151,17 @@ export default function DashboardPage() {
 
         if (emergency && !prevActiveRef.current) {
           prevActiveRef.current = true;
+          // Close modals first, mount overlay, then fade in
+          setTipModal(null);
+          setBuildingPopup(null);
+          setShowAuth(false);
+          setExitModal(null);
+          setExitPlacementMode(false);
+          setSettingsOpen(false);
+          setAlertMsg(null);
           setActiveEmergency(emergency);
-          setEmergencyVisible(true);
+          // Small delay so feed unmounts (map expands) before overlay fades in
+          requestAnimationFrame(() => setEmergencyVisible(true));
         } else if (!emergency && prevActiveRef.current) {
           prevActiveRef.current = false;
           setEmergencyVisible(false);
@@ -258,18 +337,37 @@ export default function DashboardPage() {
         minHeight: 0,
       }}
     >
-      {alertMsg && <AlertBanner message={alertMsg} onDismiss={() => setAlertMsg(null)} />}
+      {!emergencyVisible && alertMsg && <AlertBanner message={alertMsg} onDismiss={() => setAlertMsg(null)} />}
 
       <div style={{ flex: 1, minHeight: 0, display: 'flex', overflow: 'hidden' }}>
-        {/* Map area — logo overlays map only */}
+        {/* Map area */}
         <div style={{ flex: 1, minWidth: 0, minHeight: 0, position: 'relative', overflow: 'hidden' }}>
-          <div style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 30 }}>
+          {/* TopBar — fades during emergency */}
+          <div style={{
+            position: 'absolute', top: 0, left: 0, right: 0, zIndex: 30,
+            opacity: emergencyVisible ? 0 : 1,
+            pointerEvents: emergencyVisible ? 'none' : 'auto',
+            transition: 'opacity 400ms ease',
+          }}>
             <TopBar />
           </div>
-          <MapLocationSearch
-            proximity={center}
-            onNavigate={(lng, lat) => setCenter([lng, lat])}
-          />
+
+          {/* Search — fades during emergency. Must be position:absolute inset:0 so
+              MapLocationSearch's own "absolute right-4 top-4" stays relative to the map container */}
+          <div style={{
+            position: 'absolute', inset: 0, zIndex: 28, pointerEvents: 'none',
+            opacity: emergencyVisible ? 0 : 1,
+            transition: 'opacity 400ms ease',
+          }}>
+            <div style={{ pointerEvents: emergencyVisible ? 'none' : 'auto' }}>
+              <MapLocationSearch
+                proximity={center}
+                onNavigate={(lng, lat) => setCenter([lng, lat])}
+              />
+            </div>
+          </div>
+
+          {/* Map always visible */}
           <MapView
             threatBuildings={threatBuildings}
             flareBuildings={flareBuildings}
@@ -286,7 +384,8 @@ export default function DashboardPage() {
             onPlacementClick={handlePlacementClick}
             onMapRef={(map, mapboxGL) => setMapContext(map ? { map, mapboxGL } : null)}
           />
-          {/* Report button */}
+
+          {/* Report button — fades during emergency */}
           <button
             onClick={() => user ? setTipModal({ lng: center[0], lat: center[1] }) : setShowAuth(true)}
             style={{
@@ -304,16 +403,18 @@ export default function DashboardPage() {
             + REPORT
           </button>
 
-          {/* Flare speech bubbles on buildings */}
-          <FlareBubbles
-            mapContext={mapContext}
-            lng={feedLng}
-            lat={feedLat}
-            radius={flareRadiusM}
-          />
+          {/* Flare bubbles — hidden during emergency */}
+          {!emergencyVisible && (
+            <FlareBubbles
+              mapContext={mapContext}
+              lng={feedLng}
+              lat={feedLat}
+              radius={flareRadiusM}
+            />
+          )}
 
-          {/* BuildingPopup — exits management */}
-          {buildingPopup && !exitPlacementMode && (
+          {/* Building popup — hidden during emergency */}
+          {!emergencyVisible && buildingPopup && !exitPlacementMode && (
             <BuildingPopup
               buildingId={buildingPopup.buildingId}
               lng={buildingPopup.lng}
@@ -324,29 +425,39 @@ export default function DashboardPage() {
               onReportHere={handleReportFromPopup}
             />
           )}
+
+          {/* Geo-pinned emergency marker */}
+          {activeEmergency && mapContext && (
+            <EmergencyMarker emergency={activeEmergency} mapContext={mapContext} />
+          )}
         </div>
 
-        {/* Feed panel */}
-        <NotificationFeed
-          lng={feedLng}
-          lat={feedLat}
-          radius={flareRadiusM}
-          user={user}
-          is3D={is3D}
-          onToggle3D={() => setIs3D((v) => !v)}
-          onLocate={handleLocate}
-          onAuthOpen={() => setShowAuth(true)}
-          onSignOut={handleSignOut}
-          onOpenSettings={() => setSettingsOpen(true)}
-        />
+        {/* Feed panel — swaps with an equal-width spacer during emergency so the map
+            area (and report button centering) never shifts */}
+        {emergencyVisible ? (
+          <div style={{ flexShrink: 0, width: 'min(300px, 100%)' }} />
+        ) : (
+          <NotificationFeed
+            lng={feedLng}
+            lat={feedLat}
+            radius={flareRadiusM}
+            user={user}
+            is3D={is3D}
+            onToggle3D={() => setIs3D((v) => !v)}
+            onLocate={handleLocate}
+            onAuthOpen={() => setShowAuth(true)}
+            onSignOut={handleSignOut}
+            onOpenSettings={() => setSettingsOpen(true)}
+          />
+        )}
       </div>
 
-      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
+      {!emergencyVisible && settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
 
-      {tipModal && <TipModal {...tipModal} onClose={() => setTipModal(null)} onSubmit={handleTipSubmit} />}
-      {showAuth && <AuthModal onClose={() => setShowAuth(false)} onAuth={u => setUser(u as User)} />}
+      {!emergencyVisible && tipModal && <TipModal {...tipModal} onClose={() => setTipModal(null)} onSubmit={handleTipSubmit} />}
+      {!emergencyVisible && showAuth && <AuthModal onClose={() => setShowAuth(false)} onAuth={u => setUser(u as User)} />}
 
-      {exitModal && !exitPlacementMode && (
+      {!emergencyVisible && exitModal && !exitPlacementMode && (
         <ExitModal
           buildingId={exitModal.buildingId}
           isPlacementMode={exitPlacementMode}
@@ -360,6 +471,11 @@ export default function DashboardPage() {
 
       {activeEmergency && (
         <EmergencyOverlay emergency={activeEmergency} visible={emergencyVisible} />
+      )}
+
+      {/* ── DEV-ONLY emergency test widget ── */}
+      {process.env.NODE_ENV === 'development' && (
+        <DevEmergencyWidget lat={feedLat} lng={feedLng} />
       )}
 
       {/* Reveal overlay */}
