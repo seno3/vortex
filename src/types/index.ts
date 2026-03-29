@@ -53,11 +53,24 @@ export interface Deployment {
   reason: string;
 }
 
+// Label as returned by AI agents — lat/lng position
+export type LabelSeverity = 'critical' | 'warning' | 'evacuation' | 'deployment' | 'info' | 'safe';
+
 export interface Label {
   id: string;
   position: { lat: number; lng: number };
   text: string;
-  severity: 'critical' | 'warning' | 'info' | 'safe';
+  severity: LabelSeverity;
+  details?: string;
+}
+
+// Label for 3D scene rendering — converted to Three.js coordinates
+export interface SceneLabel {
+  id: string;
+  position: [number, number, number]; // x, y, z in scene space
+  text: string;
+  severity: LabelSeverity;
+  details?: string;
 }
 
 export interface AgentData {

@@ -1,11 +1,20 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { TownModel, AgentOutput, AgentData, PathSegment, DamageLevel } from '@/types';
+import { TownModel, AgentOutput, AgentData, PathSegment } from '@/types';
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY ?? '');
 
-async function callAgent(prompt: string, retries = 1): Promise<AgentData> {
+const MODEL = 'gemini-2.5-flash-preview-04-17';
+
+/** Parse the retry-after delay (seconds) out of a Gemini 429 error message. */
+function parseRetryDelay(err: unknown): number {
+  const msg = String(err);
+  const match = msg.match(/retry[^\d]*(\d+(?:\.\d+)?)s/i);
+  return match ? Math.ceil(parseFloat(match[1])) : 5;
+}
+
+async function callAgent(prompt: string, retries = 3): Promise<AgentData> {
   const model = genAI.getGenerativeModel({
-    model: 'gemini-2.5-flash',
+    model: MODEL,
     generationConfig: {
       responseMimeType: 'application/json',
       temperature: 0.3,
@@ -15,11 +24,13 @@ async function callAgent(prompt: string, retries = 1): Promise<AgentData> {
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       const result = await model.generateContent(prompt);
-      const text = result.response.text();
-      return JSON.parse(text) as AgentData;
+      return JSON.parse(result.response.text()) as AgentData;
     } catch (err) {
       if (attempt === retries) throw err;
-      console.warn(`Agent call failed, retrying... (${err})`);
+      const is429 = String(err).includes('429');
+      const delay = is429 ? parseRetryDelay(err) * 1000 : 1000 * (attempt + 1);
+      console.warn(`Agent attempt ${attempt + 1} failed (${is429 ? '429 rate-limit' : 'error'}), retrying in ${delay / 1000}s…`);
+      await new Promise((r) => setTimeout(r, delay));
     }
   }
   throw new Error('Agent failed after retries');
@@ -33,47 +44,62 @@ const EF_WIND_SPEEDS: Record<number, { min: number; max: number; width_m: number
   5: { min: 201, max: 250, width_m: 1200 },
 };
 
+// EF Scale Damage Indicator (DI) reference — embedded in agent prompts
+const EF_DI_REFERENCE = `
+EF Scale Damage Indicator Reference (TORRO/NWS standard):
+- DI 1: One/Two Family Residences (wood frame) — destroyed at EF3+ within path width
+- DI 2: Manufactured homes / mobile homes — destroyed at EF1+ winds
+- DI 3: Apartments/condos (light construction) — major damage EF2+, destroyed EF3+
+- DI 4: Masonry commercial (strip malls, retail) — major damage EF3+, destroyed EF4+
+- DI 5: Large strip mall / big-box retail — major damage EF3+, destroyed EF4+
+- DI 6: Schools (brick construction) — significant structural damage EF3+, destroyed EF4+
+- DI 7: Hospitals (reinforced concrete) — major damage EF4+, destroyed EF5
+- DI 8: Industrial/warehouse (steel frame) — major damage EF4+, destroyed EF5
+- DI 9: Churches and places of worship — major damage EF3+
+Wind speed tiers: EF1=86-110mph, EF2=111-135mph, EF3=136-165mph, EF4=166-200mph, EF5=200+mph
+`;
+
+const LABEL_SCHEMA = `
+Each label must follow this exact schema:
+{
+  "id": "unique_string",
+  "position": { "lat": number, "lng": number },
+  "text": "SHORT TITLE IN CAPS (max 40 chars)",
+  "severity": "critical" | "warning" | "evacuation" | "deployment",
+  "details": "One supporting sentence with specific data (wind speed, material, etc.)"
+}
+Severity guide: critical=life safety/structural failure, warning=significant damage/caution, evacuation=route/shelter info, deployment=response resource staging
+`;
+
 function buildPathPrompt(townModel: TownModel, efScale: number, windDirection: string): string {
   const ef = EF_WIND_SPEEDS[efScale];
-  const buildingCount = townModel.buildings.length;
+  return `You are a meteorological AI simulating an EF${efScale} tornado path for emergency planning.
 
-  return `You are a meteorological AI simulating a tornado path for emergency planning purposes.
+${EF_DI_REFERENCE}
 
-TASK: Generate a realistic EF${efScale} tornado path through the given area.
+TASK: Generate a realistic EF${efScale} tornado path through this area.
 
-EF${efScale} SPECS:
-- Wind speed: ${ef.min}–${ef.max} mph
-- Typical path width: ${ef.width_m}m
-- General movement direction: ${windDirection}
+EF${efScale} SPECS: Wind speed ${ef.min}–${ef.max} mph · Typical path width ${ef.width_m}m · General movement: ${windDirection}
 
 TOWN CENTER: ${townModel.center.lat.toFixed(5)}, ${townModel.center.lng.toFixed(5)}
-BOUNDS: N=${townModel.bounds.north.toFixed(5)}, S=${townModel.bounds.south.toFixed(5)}, E=${townModel.bounds.east.toFixed(5)}, W=${townModel.bounds.west.toFixed(5)}
-TOTAL BUILDINGS: ${buildingCount}
+BOUNDS: N=${townModel.bounds.north.toFixed(5)} S=${townModel.bounds.south.toFixed(5)} E=${townModel.bounds.east.toFixed(5)} W=${townModel.bounds.west.toFixed(5)}
+BUILDINGS: ${townModel.buildings.length}
 
-REASONING RULES:
-- Tornadoes in this region typically move SW→NE or W→E
-- Path should enter from one edge of the bounds and exit another edge
-- Generate 8–12 path points tracing a slightly irregular (not perfectly straight) track
-- Width and wind speed vary slightly along path (peak in middle, taper at ends)
-- Include 2–4 debris zones: areas of highest damage intensity
-- Generate 4–6 informational labels with positions along the path
+PATH RULES:
+- Enter from one edge, exit another (enter from the wind direction side)
+- 8–12 path points tracing a slightly curved, realistic track
+- Width and wind speed vary: peak in middle section, taper at entry/exit
+- Include 2–3 debris zones centered on peak intensity
 
-RETURN EXACTLY this JSON schema (no extra fields):
+LABEL RULES (generate exactly 5 labels along the path):
+${LABEL_SCHEMA}
+Label types to include: path entry point, peak intensity zone, debris field boundary, vortex touchdown, path exit
+
+RETURN EXACTLY this JSON (no extra fields, no markdown):
 {
-  "path_segments": [
-    { "lat": number, "lng": number, "width_m": number, "wind_speed_mph": number }
-  ],
-  "debris_zones": [
-    { "lat": number, "lng": number, "radius_m": number }
-  ],
-  "labels": [
-    {
-      "id": "label_path_1",
-      "position": { "lat": number, "lng": number },
-      "text": string,
-      "severity": "critical" | "warning" | "info"
-    }
-  ],
+  "path_segments": [{ "lat": number, "lng": number, "width_m": number, "wind_speed_mph": number }],
+  "debris_zones": [{ "lat": number, "lng": number, "radius_m": number }],
+  "labels": [...],
   "confidence": number,
   "reasoning": string,
   "summary": string
@@ -95,60 +121,41 @@ function buildStructuralPrompt(
     area_sqm: b.area_sqm,
   }));
 
-  return `You are a structural engineering AI assessing tornado damage for emergency planning.
+  return `You are a structural engineering AI assessing EF${efScale} tornado damage.
 
-TASK: For each building, determine damage level based on proximity to tornado path and building characteristics.
+${EF_DI_REFERENCE}
 
-EF SCALE: ${efScale}
-TORNADO PATH SEGMENTS: ${JSON.stringify(pathData.path_segments)}
+TORNADO PATH: ${JSON.stringify(pathData.path_segments)}
 DEBRIS ZONES: ${JSON.stringify(pathData.debris_zones)}
 
-BUILDINGS TO ASSESS (${buildingList.length} buildings):
+BUILDINGS (${buildingList.length}):
 ${JSON.stringify(buildingList)}
 
-DAMAGE REASONING RULES:
-- Distance from path centerline vs tornado width determines primary exposure
-- Buildings WITHIN path width: high destruction probability
-- Buildings within 1.5x path width: major damage likely
-- Buildings within 2x path width: minor damage possible
-- Beyond 2x path width: intact (unless in debris zone)
+ROADS: ${JSON.stringify(townModel.roads.map((r) => ({ id: r.id, name: r.name, type: r.type })))}
 
-MATERIAL RESISTANCE (lowest to highest wind resistance):
-- wood: fails at EF1+ winds; common in residential
-- brick/masonry: fails at EF2+ winds
-- concrete: fails at EF3+ winds
-- steel: fails at EF4+ winds
+ASSESSMENT RULES:
+- Buildings within path width: high destruction probability per material/DI type
+- Within 1.5x path width: major damage likely
+- Within 2x path width: minor damage possible
+- Material resistance (weakest→strongest): wood < brick < concrete < steel
+- Use EF Scale DI reference above for each building type
+- Show DI reasoning in label details: "DI 2 wood-frame, EF4 winds → destroyed"
 
-BUILDING TYPE NOTES:
-- Hospitals and schools must be assessed with extra care (life-safety critical)
-- Multi-story buildings have higher center of mass, more vulnerable to EF3+
-- Mobile homes / small residential: treat as wood, worst case
+LABEL RULES (generate exactly 6 labels at the most significant structures):
+${LABEL_SCHEMA}
+Include: worst-hit residential block, any destroyed school/hospital, commercial district damage, intact structure for contrast
 
-Also identify:
-- blocked_roads: list road IDs whose geometry passes through destroyed building zones
-- estimated_casualties: estimate based on building count × occupancy × damage severity
-- 4–6 labels highlighting critically damaged structures
-
-RETURN EXACTLY this JSON schema:
+RETURN EXACTLY this JSON:
 {
-  "damage_levels": { "building_id": "destroyed" | "major" | "minor" | "intact" },
+  "damage_levels": { "building_id": "destroyed"|"major"|"minor"|"intact" },
   "affected_buildings": ["building_id"],
   "blocked_roads": ["road_id"],
   "estimated_casualties": number,
-  "labels": [
-    {
-      "id": "label_struct_1",
-      "position": { "lat": number, "lng": number },
-      "text": string,
-      "severity": "critical" | "warning" | "info"
-    }
-  ],
+  "labels": [...],
   "confidence": number,
   "reasoning": string,
   "summary": string
-}
-
-TOWN ROADS: ${JSON.stringify(townModel.roads.map((r) => ({ id: r.id, name: r.name, type: r.type })))}`;
+}`;
 }
 
 function buildEvacuationPrompt(
@@ -156,56 +163,36 @@ function buildEvacuationPrompt(
   pathData: AgentData,
   structuralData: AgentData
 ): string {
-  return `You are an emergency management AI planning evacuation routes after a tornado strike.
+  const destroyedCount = Object.values(structuralData.damage_levels ?? {}).filter(
+    (v) => v === 'destroyed'
+  ).length;
 
-TASK: Identify safe evacuation routes, blocked roads, shelter assignments, and casualty estimates.
+  return `You are an emergency management AI planning evacuation after an EF tornado strike.
 
-TORNADO PATH: ${JSON.stringify(pathData.path_segments?.slice(0, 5))}
-BLOCKED ROADS (from structural agent): ${JSON.stringify(structuralData.blocked_roads)}
-DAMAGED BUILDINGS: ${Object.keys(structuralData.damage_levels ?? {}).filter(
-    (id) => structuralData.damage_levels![id] === 'destroyed' || structuralData.damage_levels![id] === 'major'
-  ).length} buildings destroyed or majorly damaged
-ESTIMATED CASUALTIES: ${structuralData.estimated_casualties}
+SITUATION: ${destroyedCount} buildings destroyed, ${structuralData.estimated_casualties} estimated casualties
+BLOCKED ROADS: ${JSON.stringify(structuralData.blocked_roads)}
+TORNADO PATH MIDPOINT: lat=${pathData.path_segments?.[Math.floor((pathData.path_segments?.length ?? 0) / 2)]?.lat}, lng=${pathData.path_segments?.[Math.floor((pathData.path_segments?.length ?? 0) / 2)]?.lng}
 
 ALL ROADS: ${JSON.stringify(townModel.roads.map((r) => ({ id: r.id, name: r.name, type: r.type, geometry: r.geometry.slice(0, 3) })))}
 INFRASTRUCTURE: ${JSON.stringify(townModel.infrastructure)}
 
-EVACUATION REASONING:
-- Route people away from tornado path (perpendicular to track)
-- Prefer primary/secondary roads over residential
-- Blocked roads must be avoided in routing
-- Assign shelter locations for displaced residents
-- Hospitals receive highest priority access
+ROUTING RULES:
+- Route away from damage zone (perpendicular to tornado track)
+- Avoid blocked roads
+- Prefer primary/secondary over residential
+- Identify shelters for displaced survivors
 
-Generate:
-- 3–5 evacuation routes (as road_id arrays with geometry for rendering)
-- Additional blocked roads beyond structural agent's list
-- Shelter assignments for survivors
-- Revised casualty estimate including trapped victims
-- 4–5 labels for evacuation waypoints and shelters
+LABEL RULES (generate exactly 5 labels):
+${LABEL_SCHEMA}
+Include: primary evac route, shelter location, hospital access route, blocked road warning, rescue staging area
 
-RETURN EXACTLY this JSON schema:
+RETURN EXACTLY this JSON:
 {
-  "evacuation_routes": [
-    {
-      "road_ids": ["road_id"],
-      "priority": number,
-      "geometry": [[lat, lng]]
-    }
-  ],
+  "evacuation_routes": [{ "road_ids": ["id"], "priority": number, "geometry": [[lat, lng]] }],
   "blocked_roads": ["road_id"],
-  "shelter_assignments": [
-    { "shelter_id": "infra_id", "population": number }
-  ],
+  "shelter_assignments": [{ "shelter_id": "id", "population": number }],
   "estimated_casualties": number,
-  "labels": [
-    {
-      "id": "label_evac_1",
-      "position": { "lat": number, "lng": number },
-      "text": string,
-      "severity": "critical" | "warning" | "info" | "safe"
-    }
-  ],
+  "labels": [...],
   "confidence": number,
   "reasoning": string,
   "summary": string
@@ -226,54 +213,34 @@ function buildResponsePrompt(
     (v) => v === 'major'
   ).length;
 
-  return `You are an emergency response coordination AI synthesizing all agent data into an actionable deployment plan.
+  return `You are an emergency response coordination AI creating the final deployment plan.
 
 SITUATION SUMMARY:
-- EF${efScale} tornado strike on ${townModel.population_estimate} person community
-- Buildings destroyed: ${destroyedCount}, major damage: ${majorCount}
-- Estimated casualties: ${evacuationData.estimated_casualties}
+- EF${efScale} strike on ${townModel.population_estimate.toLocaleString()} person community
+- Destroyed: ${destroyedCount} buildings · Major damage: ${majorCount} buildings
+- Casualties: ~${evacuationData.estimated_casualties}
 - Blocked roads: ${evacuationData.blocked_roads?.length ?? 0}
-- Evacuation routes active: ${evacuationData.evacuation_routes?.length ?? 0}
+- Active evac routes: ${evacuationData.evacuation_routes?.length ?? 0}
 
-INFRASTRUCTURE:
-${JSON.stringify(townModel.infrastructure)}
+INFRASTRUCTURE: ${JSON.stringify(townModel.infrastructure)}
+TORNADO PATH PEAK: ${JSON.stringify(pathData.path_segments?.[Math.floor((pathData.path_segments?.length ?? 0) / 2)])}
 
-TORNADO PATH MIDPOINT: ${JSON.stringify(pathData.path_segments?.[Math.floor((pathData.path_segments?.length ?? 0) / 2)])}
+DEPLOYMENT RULES:
+- Stage ambulances within 500m of heaviest damage, on clear roads
+- Triage at undamaged schools/community centers
+- Search priority: destroyed wood-frame residential with high occupancy
+- Command post: accessible central location outside damage zone
+- Fire crews near collapsed structures
 
-RESPONSE PLANNING GUIDELINES:
-- Stage ambulances near but outside the damage zone (within 500m of heavily damaged areas)
-- Establish triage locations at schools/community centers that are undamaged
-- Priority search zones: destroyed residential blocks with high estimated occupancy
-- Hospital routing: direct ambulances to least-damaged route to hospital
-- Fire staging: near collapsed structures for rescue operations
-- Command post: at a safe, accessible location central to operations
+LABEL RULES (generate exactly 5 labels):
+${LABEL_SCHEMA}
+Include: command post location, primary triage site, search priority zone, ambulance staging, do-not-enter perimeter
 
-Generate a complete deployment plan with:
-- 4–8 resource deployments (ambulances, fire crews, search teams, command posts)
-- 3–4 triage locations with priority levels
-- Search priority zones
-- 5–6 operational labels
-
-RETURN EXACTLY this JSON schema:
+RETURN EXACTLY this JSON:
 {
-  "deployments": [
-    {
-      "type": "ambulance" | "fire_crew" | "search_team" | "command_post" | "national_guard" | "utility_crew",
-      "location": { "lat": number, "lng": number },
-      "reason": string
-    }
-  ],
-  "triage_locations": [
-    { "lat": number, "lng": number, "priority": number }
-  ],
-  "labels": [
-    {
-      "id": "label_resp_1",
-      "position": { "lat": number, "lng": number },
-      "text": string,
-      "severity": "critical" | "warning" | "info" | "safe"
-    }
-  ],
+  "deployments": [{ "type": string, "location": { "lat": number, "lng": number }, "reason": string }],
+  "triage_locations": [{ "lat": number, "lng": number, "priority": number }],
+  "labels": [...],
   "confidence": number,
   "reasoning": string,
   "summary": string
@@ -288,27 +255,23 @@ export async function runAgents(
 ): Promise<void> {
   const now = () => Date.now();
 
-  // Agent 1: Tornado Path
-  onUpdate({ agent: 'path', timestamp: now(), type: 'update', data: { confidence: 0, reasoning: 'Analyzing meteorological data...' } });
-
+  // Agent 1: Path
+  onUpdate({ agent: 'path', timestamp: now(), type: 'update', data: { confidence: 0, reasoning: 'Analyzing meteorological data and computing path trajectory...' } });
   const pathData = await callAgent(buildPathPrompt(townModel, efScale, windDirection));
   onUpdate({ agent: 'path', timestamp: now(), type: 'final', data: pathData });
 
   // Agent 2: Structural
-  onUpdate({ agent: 'structural', timestamp: now(), type: 'update', data: { confidence: 0, reasoning: 'Assessing building vulnerabilities...' } });
-
+  onUpdate({ agent: 'structural', timestamp: now(), type: 'update', data: { confidence: 0, reasoning: 'Applying EF Scale Damage Indicators to each structure...' } });
   const structuralData = await callAgent(buildStructuralPrompt(townModel, efScale, pathData));
   onUpdate({ agent: 'structural', timestamp: now(), type: 'final', data: structuralData });
 
   // Agent 3: Evacuation
-  onUpdate({ agent: 'evacuation', timestamp: now(), type: 'update', data: { confidence: 0, reasoning: 'Computing evacuation routes...' } });
-
+  onUpdate({ agent: 'evacuation', timestamp: now(), type: 'update', data: { confidence: 0, reasoning: 'Computing evacuation routes around damage zone...' } });
   const evacuationData = await callAgent(buildEvacuationPrompt(townModel, pathData, structuralData));
   onUpdate({ agent: 'evacuation', timestamp: now(), type: 'final', data: evacuationData });
 
   // Agent 4: Response
-  onUpdate({ agent: 'response', timestamp: now(), type: 'update', data: { confidence: 0, reasoning: 'Synthesizing response plan...' } });
-
+  onUpdate({ agent: 'response', timestamp: now(), type: 'update', data: { confidence: 0, reasoning: 'Synthesizing all agent data into deployment plan...' } });
   const responseData = await callAgent(buildResponsePrompt(townModel, efScale, pathData, structuralData, evacuationData));
   onUpdate({ agent: 'response', timestamp: now(), type: 'final', data: responseData });
 }

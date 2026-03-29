@@ -20,19 +20,41 @@ interface OverpassResponse {
   elements: Array<OverpassNode | OverpassWay>;
 }
 
-const OVERPASS_ENDPOINT = 'https://overpass-api.de/api/interpreter';
-const TIMEOUT = 20000;
+// Mirror list — rotate through them to avoid 429s from the main endpoint
+const OVERPASS_ENDPOINTS = [
+  'https://overpass.kumi.systems/api/interpreter',
+  'https://overpass-api.de/api/interpreter',
+];
+
+const OVERPASS_ENDPOINT = OVERPASS_ENDPOINTS[0];
+const TIMEOUT = 8000;
 
 async function queryOverpass(query: string): Promise<OverpassResponse> {
-  const res = await fetch(OVERPASS_ENDPOINT, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: `data=${encodeURIComponent(query)}`,
-    signal: AbortSignal.timeout(TIMEOUT),
-  });
+  let lastError: Error = new Error('No endpoints tried');
 
-  if (!res.ok) throw new Error(`Overpass API error: ${res.status}`);
-  return res.json();
+  for (const endpoint of OVERPASS_ENDPOINTS) {
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `data=${encodeURIComponent(query)}`,
+        signal: AbortSignal.timeout(TIMEOUT),
+      });
+
+      if (res.status === 429) {
+        lastError = new Error(`Overpass API error: 429`);
+        continue; // try next mirror
+      }
+      if (!res.ok) throw new Error(`Overpass API error: ${res.status}`);
+      return res.json();
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      if (lastError.message.includes('429')) continue; // try next mirror
+      throw lastError; // non-rate-limit errors propagate immediately
+    }
+  }
+
+  throw lastError;
 }
 
 function inferBuildingType(tags: Record<string, string> = {}): string {

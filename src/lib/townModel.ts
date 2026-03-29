@@ -5,7 +5,15 @@ import { DEMO_TOWN_MODEL } from './fallback';
 
 const RADIUS_M = 800;
 
+const MOORE_OK_ALIASES = ['moore', 'oklahoma'];
+
 export async function buildTownModel(address: string): Promise<TownModel> {
+  // Short-circuit for the demo address — real data is already saved locally.
+  const lower = address.toLowerCase();
+  if (MOORE_OK_ALIASES.every((w) => lower.includes(w))) {
+    return DEMO_TOWN_MODEL;
+  }
+
   // Geocode
   const location = await geocodeAddress(address);
 
