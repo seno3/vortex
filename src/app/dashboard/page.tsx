@@ -46,6 +46,14 @@ export default function DashboardPage() {
 
   const feedLng = userLoc?.lng ?? center[0];
   const feedLat = userLoc?.lat ?? center[1];
+
+  // Fly to user location on first fix (covers direct reload with no URL params)
+  const userLocApplied = useRef(false);
+  useEffect(() => {
+    if (!userLoc || userLocApplied.current) return;
+    userLocApplied.current = true;
+    setCenter([userLoc.lng, userLoc.lat]);
+  }, [userLoc]);
   const [threatBuildings, setThreatBuildings] = useState<Record<string, ThreatState['threatLevel']>>({});
   const [flareBuildings, setFlareBuildings] = useState<Record<string, TipCategory>>({});
   const [locateTrigger, setLocateTrigger] = useState(0);
@@ -136,7 +144,16 @@ export default function DashboardPage() {
     setLocateTrigger(n => n + 1);
   }, []);
 
-  const handleSignOut = useCallback(() => {
+  // Restore session from cookie on mount
+  useEffect(() => {
+    fetch('/api/auth/me', { credentials: 'include' })
+      .then((r) => r.ok ? r.json() : null)
+      .then((u) => { if (u) setUser(u as User); })
+      .catch(() => {});
+  }, []);
+
+  const handleSignOut = useCallback(async () => {
+    await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {});
     setUser(null);
   }, []);
 

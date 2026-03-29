@@ -506,7 +506,7 @@ export default function Map({
     prevThreatBuildingIds.current.forEach((id) => {
       if (!nextIds.has(id)) {
         try {
-          map.removeFeatureState({ source: 'composite', sourceLayer: 'building', id }, 'threatLevel');
+          map.removeFeatureState({ source: 'composite', sourceLayer: 'building', id: Number(id) }, 'threatLevel');
         } catch {
           /* invalid id */
         }
@@ -516,7 +516,7 @@ export default function Map({
     Object.entries(tb).forEach(([buildingId, level]) => {
       try {
         map.setFeatureState(
-          { source: 'composite', sourceLayer: 'building', id: buildingId },
+          { source: 'composite', sourceLayer: 'building', id: Number(buildingId) },
           { threatLevel: level },
         );
       } catch {
@@ -538,7 +538,7 @@ export default function Map({
     prevFlareBuildingIds.current.forEach((id) => {
       if (!nextIds.has(id)) {
         try {
-          map.removeFeatureState({ source: 'composite', sourceLayer: 'building', id }, 'flareCategory');
+          map.removeFeatureState({ source: 'composite', sourceLayer: 'building', id: Number(id) }, 'flareCategory');
         } catch {
           /* invalid id */
         }
@@ -548,7 +548,7 @@ export default function Map({
     Object.entries(fb).forEach(([buildingId, category]) => {
       try {
         map.setFeatureState(
-          { source: 'composite', sourceLayer: 'building', id: buildingId },
+          { source: 'composite', sourceLayer: 'building', id: Number(buildingId) },
           { flareCategory: category },
         );
       } catch {

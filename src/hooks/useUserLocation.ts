@@ -11,6 +11,12 @@ export function useUserLocation(): UserLocation | null {
 
   useEffect(() => {
     if (!navigator?.geolocation) return;
+    // Fast one-shot to populate immediately, then watch for updates
+    navigator.geolocation.getCurrentPosition(
+      (pos) => setLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      () => {},
+      { enableHighAccuracy: false, maximumAge: 60_000, timeout: 5_000 },
+    );
     const id = navigator.geolocation.watchPosition(
       (pos) => setLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
       () => {},
