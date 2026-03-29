@@ -47,6 +47,42 @@ export interface TownModel {
   waterFeatures?: WaterFeature[];
 }
 
+// ─── Agent analysis receipt ───────────────────────────────────────────────────
+export interface AgentAnalysis {
+  classifier?: {
+    category: string;
+    threatLevel: string;
+    credibility: number;
+    sourceType: string[];
+    decayMinutes: number;
+    reasoning: string;
+    completedAt: string;
+  };
+  corroborator?: {
+    confidence: number;
+    corroboratingTips: Array<{ tipId: string; timeOffsetMs: number }>;
+    contradictions: number;
+    isEscalation: boolean;
+    reasoning: string;
+    completedAt: string;
+  };
+  synthesizer?: {
+    summary: string;
+    affectedArea: string;
+    confidence: number;
+    keyFacts: string[];
+    completedAt: string;
+  };
+  recommender?: {
+    actions: Array<{ type: string; instruction: string }>;
+    exitsUsed: number;
+    reasoning: string;
+    completedAt: string;
+  };
+  totalProcessingMs?: number;
+  agentsRun?: number;
+}
+
 // ─── Vigil domain types ───────────────────────────────────────────────────────
 export interface User {
   _id: string;
@@ -75,7 +111,7 @@ export interface Tip {
   upvoteCount?: number;
   hasUpvoted?: boolean;
   status: TipStatus;
-  agentAnalysis?: { classification: string; threatLevel: string; reasoning: string };
+  agentAnalysis?: AgentAnalysis;
   createdAt: string;
   expiresAt: string;
 }

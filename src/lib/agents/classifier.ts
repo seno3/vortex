@@ -1,12 +1,11 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY ?? '');
+import { generateJSON } from './llm';
 
 export interface ClassifierResult {
   classification: string;
   threatLevel: 'info' | 'advisory' | 'warning' | 'critical';
   credibilityAdjustment: number;
   urgencyDecayMinutes: number;
+  sourceType: string[];
   reasoning: string;
 }
 
@@ -15,10 +14,6 @@ export async function classifyTip(
   category: string,
   location: [number, number],
 ): Promise<ClassifierResult> {
-  const model = genAI.getGenerativeModel({
-    model: 'gemini-2.5-flash-preview-04-17',
-    generationConfig: { responseMimeType: 'application/json', temperature: 0.3 },
-  });
   const prompt = `You are a community safety AI classifying a public safety tip.
 
 TIP: "${description}"
@@ -31,8 +26,18 @@ Classify this tip and return JSON:
   "threatLevel": "info" | "advisory" | "warning" | "critical",
   "credibilityAdjustment": number (-20 to +20, based on specificity and plausibility),
   "urgencyDecayMinutes": number (how many minutes until tip is stale: 15-240),
+  "sourceType": ["array of applicable tags from: firsthand, secondhand, specific, vague, immediate, past, emotional"],
   "reasoning": "one sentence"
-}`;
-  const result = await model.generateContent(prompt);
-  return JSON.parse(result.response.text()) as ClassifierResult;
+}
+
+sourceType rules:
+- "firsthand" if reporter witnessed directly ("I saw", "I heard", "I'm watching")
+- "secondhand" if relaying someone else's report ("someone said", "I was told")
+- "specific" if report includes specific location details or identifiers
+- "vague" if location or event is unclear
+- "immediate" if language suggests it's happening now (present tense, urgency)
+- "past" if it happened earlier (past tense, "earlier today")
+- "emotional" if language is panicked or highly emotional (noted, does not reduce credibility)`;
+
+  return generateJSON<ClassifierResult>(prompt);
 }

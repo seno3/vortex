@@ -6,6 +6,7 @@ import { VIGIL_FLARES_CHANGED_EVENT } from '@/lib/flareSync';
 import { usePreferredUnit } from '@/hooks/usePreferredUnit';
 import CredibilityBadge from './CredibilityBadge';
 import ProfilePanel from '@/components/ui/ProfilePanel';
+import AnalysisReceipt from './AnalysisReceipt';
 
 interface NotificationFeedProps {
   lng: number;
@@ -75,6 +76,7 @@ export default function NotificationFeed({
   const [tips, setTips] = useState<Tip[]>([]);
   const [filter, setFilter] = useState<TipCategory | 'all'>('all');
   const [upvotingId, setUpvotingId] = useState<string | null>(null);
+  const [analyzingId, setAnalyzingId] = useState<string | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
   const [avatarHover, setAvatarHover] = useState(false);
 
@@ -94,6 +96,13 @@ export default function NotificationFeed({
     window.addEventListener(VIGIL_FLARES_CHANGED_EVENT, onFlaresChanged);
     return () => window.removeEventListener(VIGIL_FLARES_CHANGED_EVENT, onFlaresChanged);
   }, [loadTips]);
+
+  const handleAnalyze = async (tipId: string) => {
+    if (analyzingId) return;
+    setAnalyzingId(tipId);
+    await fetch(`/api/tips/${tipId}/analyze`, { method: 'POST', credentials: 'include' }).catch(console.error);
+    setAnalyzingId(null);
+  };
 
   const handleUpvote = async (tipId: string) => {
     if (!user || upvotingId) return;
@@ -393,6 +402,26 @@ export default function NotificationFeed({
                     <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.25)' }}>{timeAgo(tip.createdAt)}</span>
                     <CredibilityBadge score={tip.credibilityScore} />
                   </div>
+                  <button
+                    type="button"
+                    disabled={analyzingId === tip._id}
+                    onClick={() => handleAnalyze(tip._id)}
+                    title="Re-run AI analysis"
+                    style={{
+                      padding: '3px 7px',
+                      borderRadius: '999px',
+                      fontSize: '9px',
+                      letterSpacing: '0.1em',
+                      fontFamily: 'inherit',
+                      cursor: analyzingId === tip._id ? 'default' : 'pointer',
+                      background: 'rgba(255,255,255,0.04)',
+                      border: '1px solid rgba(255,255,255,0.1)',
+                      color: analyzingId === tip._id ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.3)',
+                      opacity: analyzingId === tip._id ? 0.6 : 1,
+                    }}
+                  >
+                    {analyzingId === tip._id ? '···' : '⟳ AI'}
+                  </button>
                   {user && String(tip.userId) !== user._id && (
                     <button
                       type="button"
@@ -421,6 +450,7 @@ export default function NotificationFeed({
                     </button>
                   )}
                 </div>
+                <AnalysisReceipt tip={tip} />
               </div>
             </div>
           );

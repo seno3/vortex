@@ -1,6 +1,4 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY ?? '');
+import { generateJSON } from './llm';
 
 export interface CorroboratorResult {
   corroborationIds: string[];
@@ -14,10 +12,6 @@ export async function corroborateTip(
   newTip: { _id: string; description: string; category: string },
   nearbyTips: Array<{ _id: string; description: string; category: string; credibilityScore: number }>,
 ): Promise<CorroboratorResult> {
-  const model = genAI.getGenerativeModel({
-    model: 'gemini-2.5-flash-preview-04-17',
-    generationConfig: { responseMimeType: 'application/json', temperature: 0.3 },
-  });
   const prompt = `You are a safety AI corroborating a new community tip against nearby recent tips.
 
 NEW TIP (id: ${newTip._id}): "${newTip.description}" [${newTip.category}]
@@ -33,6 +27,6 @@ Return JSON:
   "shouldEscalate": boolean (true if 3+ active_threat tips from different users suggest real danger),
   "reasoning": "one sentence"
 }`;
-  const result = await model.generateContent(prompt);
-  return JSON.parse(result.response.text()) as CorroboratorResult;
+
+  return generateJSON<CorroboratorResult>(prompt);
 }

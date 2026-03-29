@@ -15,7 +15,7 @@ export interface ITip extends Document {
   status: TipStatus;
   corroboratingTips: mongoose.Types.ObjectId[];
   contradictingTips: mongoose.Types.ObjectId[];
-  agentAnalysis?: { classification: string; threatLevel: string; reasoning: string };
+  agentAnalysis?: Record<string, unknown>;
   createdAt: Date;
   expiresAt: Date;
 }
@@ -35,11 +35,7 @@ const tipSchema = new Schema<ITip>({
   status:       { type: String, default: 'pending' },
   corroboratingTips: [{ type: Schema.Types.ObjectId, ref: 'Tip' }],
   contradictingTips: [{ type: Schema.Types.ObjectId, ref: 'Tip' }],
-  agentAnalysis: {
-    classification: String,
-    threatLevel:    String,
-    reasoning:      String,
-  },
+  agentAnalysis: { type: Schema.Types.Mixed },
   createdAt:    { type: Date, default: Date.now },
   expiresAt:    { type: Date, required: true },
 });
@@ -219,6 +215,32 @@ export async function getTipsForBuilding(buildingId: string, since?: Date): Prom
   const query: Record<string, unknown> = { buildingId, status: { $nin: ['resolved', 'flagged'] } };
   if (since) query.createdAt = { $gte: since };
   return getTipModel().find(query).sort({ createdAt: -1 });
+}
+
+/** Set one agent's sub-object inside agentAnalysis without overwriting other agents. */
+export async function setAgentField(
+  tipId: string,
+  agent: string,
+  data: Record<string, unknown>,
+): Promise<void> {
+  await connectDB();
+  await getTipModel().findByIdAndUpdate(tipId, {
+    $set: { [`agentAnalysis.${agent}`]: data },
+  });
+}
+
+/** Set top-level agentAnalysis metadata (totalProcessingMs, agentsRun). */
+export async function setAnalysisMeta(
+  tipId: string,
+  meta: { totalProcessingMs: number; agentsRun: number },
+): Promise<void> {
+  await connectDB();
+  await getTipModel().findByIdAndUpdate(tipId, {
+    $set: {
+      'agentAnalysis.totalProcessingMs': meta.totalProcessingMs,
+      'agentAnalysis.agentsRun': meta.agentsRun,
+    },
+  });
 }
 
 export async function updateTipAnalysis(
