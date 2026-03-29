@@ -3,10 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Map as MapboxMap } from 'mapbox-gl';
 import { forwardGeocodeUrl, reverseGeocodeUrl } from '@/lib/mapboxGeocoding';
-import type { Exit } from '@/types';
+import type { Exit, TipCategory } from '@/types';
 
 interface MapProps {
   threatBuildings?: Record<string, 'advisory' | 'warning' | 'critical'>;
+  /** Building id → dominant flare category (colors extrusion when no higher threat level). */
+  flareBuildings?: Record<string, TipCategory>;
   is3D?: boolean;
   center?: [number, number];
   locateTrigger?: number;
@@ -85,8 +87,23 @@ function applyMapLabelReadability(map: MapboxMap) {
   }
 }
 
+/** Matches feed / FlareBubbles — highest-severity category wins when multiple flares share a building. */
+const FLARE_CATEGORY_COLORS: Record<TipCategory, string> = {
+  active_threat: '#ef4444',
+  weather: '#3b82f6',
+  infrastructure: '#f59e0b',
+  general_safety: '#22c55e',
+};
+
+const THREAT_LEVEL_COLORS: Record<'advisory' | 'warning' | 'critical', string> = {
+  advisory: '#d97706',
+  warning: '#ea580c',
+  critical: '#dc2626',
+};
+
 export default function Map({
   threatBuildings,
+  flareBuildings,
   is3D,
   center,
   locateTrigger,
@@ -293,8 +310,20 @@ export default function Map({
             paint: {
               'fill-extrusion-color': [
                 'case',
-                ['boolean', ['feature-state', 'threatLevel'], false],
-                '#ef4444',
+                ['==', ['feature-state', 'threatLevel'], 'critical'],
+                THREAT_LEVEL_COLORS.critical,
+                ['==', ['feature-state', 'threatLevel'], 'warning'],
+                THREAT_LEVEL_COLORS.warning,
+                ['==', ['feature-state', 'threatLevel'], 'advisory'],
+                THREAT_LEVEL_COLORS.advisory,
+                ['==', ['feature-state', 'flareCategory'], 'active_threat'],
+                FLARE_CATEGORY_COLORS.active_threat,
+                ['==', ['feature-state', 'flareCategory'], 'weather'],
+                FLARE_CATEGORY_COLORS.weather,
+                ['==', ['feature-state', 'flareCategory'], 'infrastructure'],
+                FLARE_CATEGORY_COLORS.infrastructure,
+                ['==', ['feature-state', 'flareCategory'], 'general_safety'],
+                FLARE_CATEGORY_COLORS.general_safety,
                 MAP_BUILDING_EXTRUSION_DEFAULT,
               ],
               'fill-extrusion-height': ['interpolate', ['linear'], ['zoom'], 14, 0, 14.05, ['get', 'height']],
@@ -464,12 +493,27 @@ export default function Map({
     map.flyTo({ center: flyTarget.center, zoom: flyTarget.zoom, duration: 500 });
   }, [flyTarget, mapLoaded]);
 
-  // React to threatBuildings changes
+  const prevThreatBuildingIds = useRef<Set<string>>(new Set());
+  const prevFlareBuildingIds = useRef<Set<string>>(new Set());
+
+  // React to threatBuildings changes (clear removed, then set)
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !mapLoaded || !threatBuildings) return;
+    if (!map || !mapLoaded) return;
     if (!map.getLayer('3d-buildings')) return;
-    Object.entries(threatBuildings).forEach(([buildingId, level]) => {
+    const tb = threatBuildings ?? {};
+    const nextIds = new Set(Object.keys(tb));
+    prevThreatBuildingIds.current.forEach((id) => {
+      if (!nextIds.has(id)) {
+        try {
+          map.removeFeatureState({ source: 'composite', sourceLayer: 'building', id }, 'threatLevel');
+        } catch {
+          /* invalid id */
+        }
+      }
+    });
+    prevThreatBuildingIds.current = nextIds;
+    Object.entries(tb).forEach(([buildingId, level]) => {
       try {
         map.setFeatureState(
           { source: 'composite', sourceLayer: 'building', id: buildingId },
@@ -479,11 +523,39 @@ export default function Map({
         // Feature ID may not be available
       }
     });
-    // Rebuild exit features to update `threatened` property
     if (currentExitsRef.current.length > 0) {
       updateExitSource(currentExitsRef.current);
     }
   }, [threatBuildings, mapLoaded, updateExitSource]);
+
+  // Flare category colors on buildings (clear removed, then set)
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded) return;
+    if (!map.getLayer('3d-buildings')) return;
+    const fb = flareBuildings ?? {};
+    const nextIds = new Set(Object.keys(fb));
+    prevFlareBuildingIds.current.forEach((id) => {
+      if (!nextIds.has(id)) {
+        try {
+          map.removeFeatureState({ source: 'composite', sourceLayer: 'building', id }, 'flareCategory');
+        } catch {
+          /* invalid id */
+        }
+      }
+    });
+    prevFlareBuildingIds.current = nextIds;
+    Object.entries(fb).forEach(([buildingId, category]) => {
+      try {
+        map.setFeatureState(
+          { source: 'composite', sourceLayer: 'building', id: buildingId },
+          { flareCategory: category },
+        );
+      } catch {
+        // Feature ID may not be available
+      }
+    });
+  }, [flareBuildings, mapLoaded]);
 
   // React to showExits toggle
   useEffect(() => {

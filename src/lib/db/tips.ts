@@ -1,6 +1,6 @@
 import mongoose, { Schema, Document, Model } from 'mongoose';
 import { connectDB } from './mongodb';
-import { updateCredibility } from './users';
+import { incrementTipsCorroborated, updateCredibility } from './users';
 import type { TipCategory, TipUrgency, TipStatus } from '@/types';
 
 export interface ITip extends Document {
@@ -50,6 +50,28 @@ const UPVOTE_CREDIBILITY_DELTA = 2;
 const UPVOTE_AUTHOR_CREDIBILITY_DELTA = 1;
 const MAX_TIP_CREDIBILITY = 100;
 
+/** Flares stop appearing in feeds / maps after this lifetime from report time. */
+export const FLARE_LIFETIME_MS = 24 * 60 * 60 * 1000;
+
+/** Mongo filter: flare still within lifetime (`expiresAt` or legacy `createdAt` window). */
+export function buildFlareNotExpiredFilter(): Record<string, unknown> {
+  const now = new Date();
+  const createdFloor = new Date(Date.now() - FLARE_LIFETIME_MS);
+  return {
+    $or: [
+      { expiresAt: { $gt: now } },
+      { expiresAt: { $exists: false }, createdAt: { $gte: createdFloor } },
+    ],
+  };
+}
+
+export function isTipExpired(doc: { expiresAt?: Date; createdAt?: Date }): boolean {
+  const now = Date.now();
+  if (doc.expiresAt) return new Date(doc.expiresAt).getTime() <= now;
+  if (doc.createdAt) return now - new Date(doc.createdAt).getTime() > FLARE_LIFETIME_MS;
+  return true;
+}
+
 function getTipModel(): Model<ITip> {
   return mongoose.models.Tip as Model<ITip> || mongoose.model<ITip>('Tip', tipSchema);
 }
@@ -67,11 +89,16 @@ export async function upvoteTip(
 
   const updated = await Tip.findOneAndUpdate(
     {
-      _id: tipId,
-      userId: { $ne: voterOid },
-      $expr: {
-        $not: { $in: [voterOid, { $ifNull: ['$upvotedBy', []] }] },
-      },
+      $and: [
+        { _id: tipId },
+        { userId: { $ne: voterOid } },
+        buildFlareNotExpiredFilter(),
+        {
+          $expr: {
+            $not: { $in: [voterOid, { $ifNull: ['$upvotedBy', []] }] },
+          },
+        },
+      ],
     },
     {
       $addToSet: { upvotedBy: voterOid },
@@ -86,12 +113,14 @@ export async function upvoteTip(
       await updated.save();
     }
     await updateCredibility(String(updated.userId), UPVOTE_AUTHOR_CREDIBILITY_DELTA);
+    incrementTipsCorroborated(voterUserId).catch(console.error);
     const count = updated.upvotedBy?.length ?? 0;
     return { ok: true, credibilityScore: updated.credibilityScore, upvoteCount: count, already: false };
   }
 
   const tip = await Tip.findById(tipId).lean();
   if (!tip) return { ok: false, reason: 'not_found' };
+  if (isTipExpired(tip)) return { ok: false, reason: 'not_found' };
   if (String(tip.userId) === voterUserId) return { ok: false, reason: 'own_tip' };
   const ids = (tip.upvotedBy ?? []).map((id) => String(id));
   if (ids.includes(voterUserId)) {
@@ -171,6 +200,20 @@ export async function getTipsByUser(userId: string): Promise<ITip[]> {
   return getTipModel().find({ userId: new mongoose.Types.ObjectId(userId) }).sort({ createdAt: -1 }).limit(20);
 }
 
+export async function deleteTipForUser(
+  tipId: string,
+  userId: string,
+): Promise<{ ok: true } | { ok: false; reason: 'not_found' }> {
+  if (!mongoose.Types.ObjectId.isValid(tipId)) return { ok: false, reason: 'not_found' };
+  await connectDB();
+  const res = await getTipModel().deleteOne({
+    _id: new mongoose.Types.ObjectId(tipId),
+    userId: new mongoose.Types.ObjectId(userId),
+  });
+  if (res.deletedCount === 0) return { ok: false, reason: 'not_found' };
+  return { ok: true };
+}
+
 export async function getTipsForBuilding(buildingId: string, since?: Date): Promise<ITip[]> {
   await connectDB();
   const query: Record<string, unknown> = { buildingId, status: { $nin: ['resolved', 'flagged'] } };
@@ -193,7 +236,17 @@ export async function getActiveThreatBuildings(): Promise<
   await connectDB();
   const since = new Date(Date.now() - 10 * 60 * 1000);
   const results = await getTipModel().aggregate([
-    { $match: { category: 'active_threat', createdAt: { $gte: since }, buildingId: { $exists: true }, status: { $nin: ['resolved', 'flagged'] } } },
+    {
+      $match: {
+        $and: [
+          { category: 'active_threat' },
+          { createdAt: { $gte: since } },
+          { buildingId: { $exists: true, $ne: null } },
+          { status: { $nin: ['resolved', 'flagged'] } },
+          buildFlareNotExpiredFilter(),
+        ],
+      },
+    },
     { $group: { _id: '$buildingId', tipCount: { $sum: 1 }, maxUrgency: { $max: '$urgency' } } },
     { $match: { tipCount: { $gte: 2 } } },
   ]);

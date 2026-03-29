@@ -7,6 +7,7 @@ export interface IUser extends Document {
   createdAt: Date;
   credibilityScore: number;
   tipsSubmitted: number;
+  /** Number of flares this user has upvoted (others’ tips). */
   tipsCorroborated: number;
   tipsFlagged: number;
 }
@@ -43,6 +44,12 @@ export async function findById(id: string): Promise<IUser | null> {
 export async function incrementTipsSubmitted(userId: string): Promise<void> {
   await connectDB();
   await getUserModel().findByIdAndUpdate(userId, { $inc: { tipsSubmitted: 1 } });
+}
+
+/** One count per successful upvote on someone else's flare (shown on account as corroborations). */
+export async function incrementTipsCorroborated(userId: string): Promise<void> {
+  await connectDB();
+  await getUserModel().findByIdAndUpdate(userId, { $inc: { tipsCorroborated: 1 } });
 }
 
 export async function updateCredibility(userId: string, delta: number): Promise<void> {

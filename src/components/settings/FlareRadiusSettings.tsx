@@ -1,7 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { FLARE_RADIUS_PRESETS, readStoredFlareRadiusM, writeStoredFlareRadiusM } from '@/lib/flareRadius';
+import {
+  formatFlareRadiusShort,
+  getFlareRadiusPresets,
+  readStoredFlareRadiusM,
+  writeStoredFlareRadiusM,
+} from '@/lib/flareRadius';
+import { usePreferredUnit } from '@/hooks/usePreferredUnit';
 
 const FONT = 'var(--font-sans, sans-serif)';
 
@@ -41,6 +47,7 @@ function IconFlare() {
 }
 
 export function FlareRadiusSelect() {
+  const { unit } = usePreferredUnit();
   const [storedM, setStoredM] = useState(() => readStoredFlareRadiusM());
 
   const sync = useCallback(() => setStoredM(readStoredFlareRadiusM()), []);
@@ -50,7 +57,8 @@ export function FlareRadiusSelect() {
     return () => window.removeEventListener('vigil-flare-radius', sync);
   }, [sync]);
 
-  const presetSet = useMemo(() => new Set(FLARE_RADIUS_PRESETS.map((p) => p.meters)), []);
+  const presets = useMemo(() => getFlareRadiusPresets(unit), [unit]);
+  const presetSet = useMemo(() => new Set(presets.map((p) => p.meters)), [presets]);
 
   const onChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const meters = Number(e.target.value);
@@ -70,10 +78,10 @@ export function FlareRadiusSelect() {
     >
       {!presetSet.has(storedM) && (
         <option value={storedM} style={{ background: '#1a1a24', color: '#f4f4f8' }}>
-          {storedM >= 1000 ? `${(storedM / 1000).toFixed(1)} km` : `${storedM} m`}
+          {formatFlareRadiusShort(storedM, unit)}
         </option>
       )}
-      {FLARE_RADIUS_PRESETS.map(({ meters, label }) => (
+      {presets.map(({ meters, label }) => (
         <option key={meters} value={meters} style={{ background: '#1a1a24', color: '#f4f4f8' }}>
           {label}
         </option>

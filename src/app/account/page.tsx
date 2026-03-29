@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { User, Tip } from '@/types';
+import { dispatchFlaresChanged } from '@/lib/flareSync';
 
 const SANS = 'var(--font-sans, sans-serif)';
 const MONO = 'var(--font-mono, monospace)';
@@ -28,36 +29,6 @@ function formatCoords(lng: number, lat: number): string {
   return `(${Math.abs(lat).toFixed(4)}° ${lat >= 0 ? 'N' : 'S'}, ${Math.abs(lng).toFixed(4)}° ${lng >= 0 ? 'E' : 'W'})`;
 }
 
-function Toggle({ on, onToggle }: { on: boolean; onToggle: () => void }) {
-  return (
-    <div
-      onClick={onToggle}
-      style={{
-        width: 36,
-        height: 20,
-        borderRadius: 100,
-        background: on ? 'rgba(59,130,246,0.7)' : 'rgba(255,255,255,0.1)',
-        border: `1px solid ${on ? 'rgba(59,130,246,0.4)' : 'rgba(255,255,255,0.12)'}`,
-        cursor: 'pointer',
-        position: 'relative',
-        transition: 'background 200ms ease, border-color 200ms ease',
-        flexShrink: 0,
-      }}
-    >
-      <div style={{
-        position: 'absolute',
-        top: 2,
-        left: on ? 18 : 2,
-        width: 14,
-        height: 14,
-        borderRadius: '50%',
-        background: on ? '#fff' : 'rgba(255,255,255,0.4)',
-        transition: 'left 200ms ease, background 200ms ease',
-      }} />
-    </div>
-  );
-}
-
 function SkeletonRow() {
   return (
     <div style={{
@@ -75,16 +46,8 @@ export default function AccountPage() {
   const [user, setUser] = useState<User | null>(null);
   const [tips, setTips] = useState<Tip[]>([]);
   const [tipsLoading, setTipsLoading] = useState(true);
-  const [unit, setUnit] = useState<'mi' | 'km'>('mi');
-  const [notifs, setNotifs] = useState(false);
-  const [privacy, setPrivacy] = useState(false);
   const [visible, setVisible] = useState(false);
   const [backHover, setBackHover] = useState(false);
-
-  useEffect(() => {
-    const stored = localStorage.getItem('vigil_unit');
-    if (stored === 'mi' || stored === 'km') setUnit(stored);
-  }, []);
 
   useEffect(() => {
     fetch('/api/auth/me').then(r => {
@@ -105,12 +68,6 @@ export default function AccountPage() {
     return () => clearTimeout(t);
   }, []);
 
-  const toggleUnit = () => {
-    const next = unit === 'mi' ? 'km' : 'mi';
-    setUnit(next);
-    localStorage.setItem('vigil_unit', next);
-  };
-
   const handleSignOut = () => {
     document.cookie = 'vigil_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
     router.push('/');
@@ -124,6 +81,14 @@ export default function AccountPage() {
 
   const initial = user ? user.username[0].toUpperCase() : '?';
 
+  const handleDeleteTip = async (tipId: string) => {
+    const res = await fetch(`/api/tips/${tipId}`, { method: 'DELETE', credentials: 'include' });
+    if (res.ok) {
+      setTips((prev) => prev.filter((t) => t._id !== tipId));
+      dispatchFlaresChanged();
+    }
+  };
+
   return (
     <div style={{ minHeight: '100vh', background: '#0a0a0a', fontFamily: SANS }}>
       <style>{`
@@ -134,6 +99,20 @@ export default function AccountPage() {
         @media (max-width: 560px) {
           .account-identity { flex-direction: column !important; align-items: center !important; text-align: center !important; }
           .account-body { padding: 24px 16px !important; }
+        }
+        .account-flares-scroll {
+          scrollbar-width: thin;
+          scrollbar-color: rgba(255,255,255,0.2) transparent;
+        }
+        .account-flares-scroll::-webkit-scrollbar {
+          width: 6px;
+        }
+        .account-flares-scroll::-webkit-scrollbar-thumb {
+          background: rgba(255,255,255,0.14);
+          border-radius: 4px;
+        }
+        .account-flares-scroll::-webkit-scrollbar-track {
+          background: transparent;
         }
       `}</style>
 
@@ -227,7 +206,7 @@ export default function AccountPage() {
                   {user?.tipsSubmitted ?? 0} SUBMITTED
                 </span>
                 <span style={{ fontFamily: MONO, fontSize: 10, color: 'rgba(255,255,255,0.2)', letterSpacing: '0.05em' }}>
-                  {user?.tipsCorroborated ?? 0} CORROBORATED
+                  {user?.tipsCorroborated ?? 0} CORROBORATIONS
                 </span>
               </div>
             </div>
@@ -272,73 +251,26 @@ export default function AccountPage() {
               <div style={{ fontFamily: SANS, fontSize: 12, color: 'rgba(255,255,255,0.25)', marginBottom: 12 }}>
                 {user?.tipsSubmitted ?? tips.length} flare{(user?.tipsSubmitted ?? tips.length) !== 1 ? 's' : ''} submitted
               </div>
-              {tips.map(tip => (
-                <TipCard key={tip._id} tip={tip} />
-              ))}
+              <div
+                className="account-flares-scroll"
+                style={{
+                  maxHeight: 'min(420px, 52vh)',
+                  overflowY: 'auto',
+                  overflowX: 'hidden',
+                  paddingRight: 6,
+                  WebkitOverflowScrolling: 'touch',
+                }}
+              >
+                {tips.map((tip) => (
+                  <TipCard key={tip._id} tip={tip} onDelete={() => handleDeleteTip(tip._id)} />
+                ))}
+              </div>
             </>
           )}
         </div>
 
-        {/* Settings */}
-        <div style={fade(220)}>
-          <div style={{
-            fontFamily: MONO,
-            fontSize: 9,
-            letterSpacing: '0.2em',
-            color: 'rgba(255,255,255,0.25)',
-            textTransform: 'uppercase',
-            marginBottom: 10,
-          }}>
-            SETTINGS
-          </div>
-          <div style={{
-            background: 'rgba(255,255,255,0.03)',
-            border: '1px solid rgba(255,255,255,0.07)',
-            borderRadius: 14,
-            overflow: 'hidden',
-          }}>
-            <SettingsRow
-              label="Display units"
-              borderBottom
-              right={
-                <div style={{ display: 'flex', gap: 2, background: 'rgba(255,255,255,0.06)', borderRadius: 100, padding: 2 }}>
-                  {(['mi', 'km'] as const).map(opt => (
-                    <button
-                      key={opt}
-                      onClick={() => { setUnit(opt); localStorage.setItem('vigil_unit', opt); }}
-                      style={{
-                        fontFamily: MONO,
-                        fontSize: 10,
-                        padding: '4px 10px',
-                        borderRadius: 100,
-                        background: unit === opt ? 'rgba(255,255,255,0.12)' : 'transparent',
-                        color: unit === opt ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.3)',
-                        cursor: 'pointer',
-                        border: 'none',
-                        transition: 'background 150ms ease, color 150ms ease',
-                      }}
-                    >
-                      {opt}
-                    </button>
-                  ))}
-                </div>
-              }
-            />
-            <SettingsRow
-              label="Notifications"
-              borderBottom
-              right={<Toggle on={notifs} onToggle={() => setNotifs(v => !v)} />}
-            />
-            <SettingsRow
-              label="Privacy mode"
-              subLabel="Hides your location from the map"
-              right={<Toggle on={privacy} onToggle={() => setPrivacy(v => !v)} />}
-            />
-          </div>
-        </div>
-
         {/* Danger zone */}
-        <div style={fade(280)}>
+        <div style={fade(220)}>
           <div style={{
             fontFamily: MONO,
             fontSize: 9,
@@ -369,8 +301,9 @@ export default function AccountPage() {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function TipCard({ tip }: { tip: Tip }) {
+function TipCard({ tip, onDelete }: { tip: Tip; onDelete: () => void }) {
   const [hover, setHover] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const coords = tip.location?.coordinates;
   const [lng, lat] = coords ?? [0, 0];
   const color = URGENCY_COLOR[tip.urgency] ?? '#3B82F6';
@@ -405,7 +338,7 @@ function TipCard({ tip }: { tip: Tip }) {
         background: color,
       }} />
 
-      {/* Row 1: building id + urgency badge + time */}
+      {/* Row 1: building id + urgency badge + time + delete */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span style={{ fontFamily: 'var(--font-sans, sans-serif)', fontSize: 13, fontWeight: 500, color: 'rgba(255,255,255,0.85)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {tip.buildingId ? `Building ${tip.buildingId.slice(-6)}` : tip.category.replace('_', ' ')}
@@ -427,6 +360,32 @@ function TipCard({ tip }: { tip: Tip }) {
         <span style={{ fontFamily: MONO, fontSize: 10, color: 'rgba(255,255,255,0.25)', flexShrink: 0 }}>
           {timeAgo(tip.createdAt)}
         </span>
+        <button
+          type="button"
+          disabled={deleting}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (deleting) return;
+            setDeleting(true);
+            Promise.resolve(onDelete()).finally(() => setDeleting(false));
+          }}
+          style={{
+            flexShrink: 0,
+            padding: '4px 8px',
+            borderRadius: 8,
+            border: '1px solid rgba(239,68,68,0.35)',
+            background: 'rgba(239,68,68,0.08)',
+            color: 'rgba(248,113,113,0.95)',
+            fontFamily: MONO,
+            fontSize: 9,
+            letterSpacing: '0.08em',
+            textTransform: 'uppercase',
+            cursor: deleting ? 'wait' : 'pointer',
+            opacity: deleting ? 0.6 : 1,
+          }}
+        >
+          {deleting ? '…' : 'Delete'}
+        </button>
       </div>
 
       {/* Row 2: description */}
@@ -446,46 +405,6 @@ function TipCard({ tip }: { tip: Tip }) {
       <div style={{ fontFamily: MONO, fontSize: 10, color: 'rgba(255,255,255,0.2)', letterSpacing: '0.03em' }}>
         {formatCoords(lng, lat)}
       </div>
-    </div>
-  );
-}
-
-function SettingsRow({
-  label,
-  subLabel,
-  right,
-  borderBottom,
-}: {
-  label: string;
-  subLabel?: string;
-  right?: React.ReactNode;
-  borderBottom?: boolean;
-}) {
-  const [hover, setHover] = useState(false);
-  return (
-    <div
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      style={{
-        minHeight: 52,
-        padding: '0 18px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        borderBottom: borderBottom ? '1px solid rgba(255,255,255,0.05)' : undefined,
-        background: hover ? 'rgba(255,255,255,0.04)' : 'transparent',
-        transition: 'background 120ms ease',
-        cursor: 'default',
-        gap: 16,
-      }}
-    >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-        <span style={{ fontFamily: SANS, fontSize: 13, color: 'rgba(255,255,255,0.75)' }}>{label}</span>
-        {subLabel && (
-          <span style={{ fontFamily: SANS, fontSize: 11, color: 'rgba(255,255,255,0.25)' }}>{subLabel}</span>
-        )}
-      </div>
-      {right}
     </div>
   );
 }

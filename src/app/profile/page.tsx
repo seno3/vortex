@@ -29,7 +29,7 @@ export default function ProfilePage() {
         <div style={{ fontSize: '48px', fontWeight: 300, color: scoreColor, margin: '20px 0 8px', lineHeight: 1 }}>{user.credibilityScore}</div>
         <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.3)', letterSpacing: '0.2em', marginBottom: '24px' }}>CREDIBILITY SCORE</div>
         <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
-          {[{ label: 'TIPS', value: user.tipsSubmitted }, { label: 'CORROBORATED', value: user.tipsCorroborated }, { label: 'FLAGGED', value: user.tipsFlagged }].map(stat => (
+          {[{ label: 'TIPS', value: user.tipsSubmitted }, { label: 'CORROBORATIONS', value: user.tipsCorroborated }, { label: 'FLAGGED', value: user.tipsFlagged }].map(stat => (
             <div key={stat.label} style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', padding: '12px 16px', textAlign: 'center' }}>
               <div style={{ fontSize: '20px', color: 'rgba(255,255,255,0.8)', marginBottom: '4px' }}>{stat.value}</div>
               <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.3)', letterSpacing: '0.15em' }}>{stat.label}</div>

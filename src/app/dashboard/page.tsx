@@ -3,8 +3,9 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
-import type { User, TipCategory, TipUrgency, ThreatState, Emergency, Exit, ExitType } from '@/types';
+import type { User, Tip, TipCategory, TipUrgency, ThreatState, Emergency, Exit, ExitType } from '@/types';
 import TopBar from '@/components/TopBar';
+import MapLocationSearch from '@/components/MapLocationSearch';
 import NotificationFeed from '@/components/NotificationFeed';
 import TipModal from '@/components/TipModal';
 import AuthModal from '@/components/AuthModal';
@@ -16,8 +17,19 @@ import EmergencyOverlay from '@/components/emergency/EmergencyOverlay';
 import SettingsModal from '@/components/settings/SettingsModal';
 import { useFlareRadiusM } from '@/hooks/useFlareRadiusM';
 import { useUserLocation } from '@/hooks/useUserLocation';
+import { dispatchFlaresChanged, VIGIL_FLARES_CHANGED_EVENT } from '@/lib/flareSync';
 
-const Map = dynamic(() => import('@/components/Map'), { ssr: false });
+const MapView = dynamic(() => import('@/components/Map'), { ssr: false });
+
+/** Same priority as FlareBubbles — one color per building when multiple flares exist. */
+const FLARE_CATEGORY_PRIORITY: TipCategory[] = ['active_threat', 'infrastructure', 'weather', 'general_safety'];
+
+function topFlareCategory(tips: Tip[]): TipCategory {
+  for (const cat of FLARE_CATEGORY_PRIORITY) {
+    if (tips.some((t) => t.category === cat)) return cat;
+  }
+  return 'general_safety';
+}
 
 export default function DashboardPage() {
   const searchParams = useSearchParams();
@@ -35,6 +47,7 @@ export default function DashboardPage() {
   const feedLng = userLoc?.lng ?? center[0];
   const feedLat = userLoc?.lat ?? center[1];
   const [threatBuildings, setThreatBuildings] = useState<Record<string, ThreatState['threatLevel']>>({});
+  const [flareBuildings, setFlareBuildings] = useState<Record<string, TipCategory>>({});
   const [locateTrigger, setLocateTrigger] = useState(0);
   const [tipModal, setTipModal] = useState<{ lng: number; lat: number; buildingId?: string } | null>(null);
   const [mapContext, setMapContext] = useState<{ map: any; mapboxGL: any } | null>(null);
@@ -85,6 +98,30 @@ export default function DashboardPage() {
     }
   }, []);
 
+  const refreshFlareBuildings = useCallback(async () => {
+    try {
+      const res = await fetch(
+        `/api/tips?lng=${feedLng}&lat=${feedLat}&radius=${flareRadiusM}`,
+        { credentials: 'include' },
+      );
+      const tips: Tip[] = await res.json();
+      if (!Array.isArray(tips)) return;
+      const byBuilding = new Map<string, Tip[]>();
+      for (const t of tips) {
+        if (!t.buildingId) continue;
+        if (!byBuilding.has(t.buildingId)) byBuilding.set(t.buildingId, []);
+        byBuilding.get(t.buildingId)!.push(t);
+      }
+      const next: Record<string, TipCategory> = {};
+      byBuilding.forEach((arr: Tip[], id: string) => {
+        next[id] = topFlareCategory(arr);
+      });
+      setFlareBuildings(next);
+    } catch {
+      /* silent */
+    }
+  }, [feedLng, feedLat, flareRadiusM]);
+
   const handleMapClick = useCallback((lng: number, lat: number) => {
     if (!user) { setShowAuth(true); return; }
     setTipModal({ lng, lat });
@@ -105,13 +142,29 @@ export default function DashboardPage() {
 
   const handleTipSubmit = useCallback(async (data: { category: TipCategory; description: string; urgency: TipUrgency }) => {
     if (!tipModal || !user) return;
-    await fetch('/api/tips', {
+    const res = await fetch('/api/tips', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body: JSON.stringify({ lng: tipModal.lng, lat: tipModal.lat, buildingId: tipModal.buildingId, ...data }),
     });
-    setTimeout(refreshThreats, 3000);
-  }, [tipModal, user, refreshThreats]);
+    if (res.ok) {
+      dispatchFlaresChanged();
+    }
+  }, [tipModal, user]);
+
+  useEffect(() => {
+    refreshFlareBuildings();
+  }, [refreshFlareBuildings]);
+
+  useEffect(() => {
+    const onFlaresChanged = () => {
+      refreshThreats();
+      refreshFlareBuildings();
+    };
+    window.addEventListener(VIGIL_FLARES_CHANGED_EVENT, onFlaresChanged);
+    return () => window.removeEventListener(VIGIL_FLARES_CHANGED_EVENT, onFlaresChanged);
+  }, [refreshThreats, refreshFlareBuildings]);
 
   const handleReportFromPopup = useCallback(() => {
     if (!buildingPopup) return;
@@ -179,8 +232,13 @@ export default function DashboardPage() {
           <div style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 30 }}>
             <TopBar />
           </div>
-          <Map
+          <MapLocationSearch
+            proximity={center}
+            onNavigate={(lng, lat) => setCenter([lng, lat])}
+          />
+          <MapView
             threatBuildings={threatBuildings}
+            flareBuildings={flareBuildings}
             is3D={is3D}
             center={center}
             locateTrigger={locateTrigger}

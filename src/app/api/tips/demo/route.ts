@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createTip } from '@/lib/db/tips';
+import { createTip, FLARE_LIFETIME_MS } from '@/lib/db/tips';
 import { processTip } from '@/lib/agents/orchestrator';
 
 // Demo building in downtown area — triggers full escalation
@@ -8,7 +8,7 @@ const DEMO_LNG = -87.6298;
 const DEMO_LAT = 41.8781;
 
 export async function POST() {
-  const expiresAt = new Date(Date.now() + 4 * 60 * 60 * 1000);
+  const expiresAt = new Date(Date.now() + FLARE_LIFETIME_MS);
   const demoUserId = '000000000000000000000001';
 
   const tips = await Promise.all([

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getAuthUser } from '@/lib/auth';
-import { createTip, formatTipForClient, getTipsInArea } from '@/lib/db/tips';
+import { createTip, FLARE_LIFETIME_MS, formatTipForClient, getTipsInArea } from '@/lib/db/tips';
 import { findById, incrementTipsSubmitted } from '@/lib/db/users';
 import { processTip } from '@/lib/agents/orchestrator';
 
@@ -25,7 +25,7 @@ export async function POST(req: Request) {
   const user = await findById(userId);
   const credibilityScore = user?.credibilityScore ?? 50;
 
-  const expiresAt = new Date(Date.now() + 4 * 60 * 60 * 1000); // 4 hours
+  const expiresAt = new Date(Date.now() + FLARE_LIFETIME_MS);
 
   const tip = await createTip({
     userId,

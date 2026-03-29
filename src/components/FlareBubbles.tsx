@@ -1,7 +1,8 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { Tip, TipCategory } from '@/types';
+import { VIGIL_FLARES_CHANGED_EVENT } from '@/lib/flareSync';
 
 interface BuildingGroup {
   buildingId: string;
@@ -236,10 +237,19 @@ function Bubble({
 export default function FlareBubbles({ mapContext, lng, lat, radius }: FlareBubblesProps) {
   const [groups, setGroups] = useState<BuildingGroup[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  /** Bumps when flares are added/removed elsewhere so we refetch immediately. */
+  const [flaresTick, setFlaresTick] = useState(0);
   // Map from buildingId → { marker, el }
   const markersRef = useRef<Map<string, { marker: any; el: HTMLDivElement }>>(new Map());
   // Increment to force re-render after marker DOM elements are created
   const [portalTick, setPortalTick] = useState(0);
+
+  const bumpFlares = useCallback(() => setFlaresTick((t) => t + 1), []);
+
+  useEffect(() => {
+    window.addEventListener(VIGIL_FLARES_CHANGED_EVENT, bumpFlares);
+    return () => window.removeEventListener(VIGIL_FLARES_CHANGED_EVENT, bumpFlares);
+  }, [bumpFlares]);
 
   // Inject animation keyframes + scrollbar-hiding class once
   useEffect(() => {
@@ -294,7 +304,7 @@ export default function FlareBubbles({ mapContext, lng, lat, radius }: FlareBubb
       cancelled = true;
       clearInterval(id);
     };
-  }, [lng, lat, radius]);
+  }, [lng, lat, radius, flaresTick]);
 
   // Create / remove Mapbox markers when groups or map changes
   useEffect(() => {

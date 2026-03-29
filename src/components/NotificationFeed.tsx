@@ -2,6 +2,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { Tip, TipCategory, User } from '@/types';
 import { formatFlareRadiusShort } from '@/lib/flareRadius';
+import { VIGIL_FLARES_CHANGED_EVENT } from '@/lib/flareSync';
+import { usePreferredUnit } from '@/hooks/usePreferredUnit';
 import CredibilityBadge from './CredibilityBadge';
 import ProfilePanel from '@/components/ui/ProfilePanel';
 
@@ -69,6 +71,7 @@ export default function NotificationFeed({
   onSignOut,
   onOpenSettings,
 }: NotificationFeedProps) {
+  const { unit } = usePreferredUnit();
   const [tips, setTips] = useState<Tip[]>([]);
   const [filter, setFilter] = useState<TipCategory | 'all'>('all');
   const [upvotingId, setUpvotingId] = useState<string | null>(null);
@@ -84,6 +87,12 @@ export default function NotificationFeed({
 
   useEffect(() => {
     loadTips();
+  }, [loadTips]);
+
+  useEffect(() => {
+    const onFlaresChanged = () => loadTips();
+    window.addEventListener(VIGIL_FLARES_CHANGED_EVENT, onFlaresChanged);
+    return () => window.removeEventListener(VIGIL_FLARES_CHANGED_EVENT, onFlaresChanged);
   }, [loadTips]);
 
   const handleUpvote = async (tipId: string) => {
@@ -319,7 +328,7 @@ export default function NotificationFeed({
             Live Feed
           </div>
           <div style={{ fontSize: '15px', color: 'rgba(255,255,255,0.28)', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>
-            Within {formatFlareRadiusShort(radius)}
+            Within {formatFlareRadiusShort(radius, unit)}
           </div>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%', paddingBottom: 14 }}>
