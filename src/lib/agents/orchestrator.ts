@@ -42,8 +42,8 @@ export async function processTip(tip: ITip): Promise<void> {
       [lng, lat],
     );
 
-    // Step 4: Recommend
-    await recommendActions(synthesis.summary, synthesis.estimatedSeverity, [lng, lat]);
+    // Step 4: Recommend (include building exit data if available)
+    await recommendActions(synthesis.summary, synthesis.estimatedSeverity, [lng, lat], tip.buildingId);
 
     await updateTipAnalysis(String(tip._id), {
       classification: classification.classification,

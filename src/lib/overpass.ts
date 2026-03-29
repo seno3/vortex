@@ -1,4 +1,14 @@
-import { Building, Road, Infrastructure, WaterFeature } from '@/types';
+import { Building, Road, Infrastructure, WaterFeature, ExitType } from '@/types';
+
+export interface OSMExit {
+  id: string;
+  location: { lat: number; lng: number };
+  exitType: ExitType;
+  floor: number;
+  accessible: boolean;
+  source: 'osm';
+  buildingId?: string;
+}
 
 interface OverpassNode {
   type: 'node';
@@ -380,4 +390,58 @@ out body geom;
   }
 
   return { buildings, roads, infrastructure, waterFeatures };
+}
+
+function inferExitType(tags: Record<string, string>): ExitType {
+  const entrance = tags['entrance'] ?? '';
+  const exit = tags['exit'] ?? '';
+  if (entrance === 'emergency' || exit === 'emergency') return 'emergency';
+  if (entrance === 'main') return 'main';
+  if (entrance === 'service') return 'service';
+  if (entrance === 'staircase') return 'staircase';
+  // entrance=yes, entrance=exit, exit=yes
+  return 'side';
+}
+
+export async function fetchExitsFromOSM(
+  lat: number,
+  lng: number,
+  radius: number,
+): Promise<OSMExit[]> {
+  const query = `
+[out:json][timeout:15];
+(
+  node["entrance"="main"](around:${radius},${lat},${lng});
+  node["entrance"="yes"](around:${radius},${lat},${lng});
+  node["entrance"="emergency"](around:${radius},${lat},${lng});
+  node["entrance"="exit"](around:${radius},${lat},${lng});
+  node["entrance"="service"](around:${radius},${lat},${lng});
+  node["entrance"="staircase"](around:${radius},${lat},${lng});
+  node["exit"="emergency"](around:${radius},${lat},${lng});
+  node["exit"="yes"](around:${radius},${lat},${lng});
+);
+out body;
+  `.trim();
+
+  const data = await queryOverpass(query);
+  const exits: OSMExit[] = [];
+
+  for (const el of data.elements) {
+    if (el.type !== 'node') continue;
+    const node = el as OverpassNode;
+    const tags = node.tags ?? {};
+    const floor = parseInt(tags['level'] ?? '0', 10) || 0;
+    const accessible = tags['wheelchair'] === 'yes';
+
+    exits.push({
+      id: `osm_exit_${node.id}`,
+      location: { lat: node.lat, lng: node.lon },
+      exitType: inferExitType(tags),
+      floor,
+      accessible,
+      source: 'osm',
+    });
+  }
+
+  return exits;
 }

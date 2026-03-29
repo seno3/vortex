@@ -84,6 +84,24 @@ export interface ThreatState {
   synthesis?: string;
 }
 
+// ─── Exit domain types ────────────────────────────────────────────────────────
+export type ExitType = 'main' | 'side' | 'emergency' | 'fire_escape' | 'service' | 'staircase';
+export type ExitStatus = 'active' | 'blocked' | 'locked';
+
+export interface Exit {
+  _id: string;
+  userId?: string;
+  buildingId: string;
+  location: { lat: number; lng: number };
+  exitType: ExitType;
+  floor: number;
+  description?: string;
+  accessible: boolean;
+  status: ExitStatus;
+  source: 'osm' | 'community';
+  createdAt?: string;
+}
+
 // ─── Emergency domain types ───────────────────────────────────────────────────
 export type EmergencyType = 'shooting' | 'tornado' | 'earthquake' | 'fire';
 

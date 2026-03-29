@@ -3,12 +3,14 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
-import type { User, TipCategory, TipUrgency, ThreatState, Emergency } from '@/types';
+import type { User, TipCategory, TipUrgency, ThreatState, Emergency, Exit, ExitType } from '@/types';
 import TopBar from '@/components/TopBar';
 import NotificationFeed from '@/components/NotificationFeed';
 import TipModal from '@/components/TipModal';
 import AuthModal from '@/components/AuthModal';
 import AlertBanner from '@/components/AlertBanner';
+import BuildingPopup from '@/components/BuildingPopup';
+import ExitModal from '@/components/ExitModal';
 import EmergencyOverlay from '@/components/emergency/EmergencyOverlay';
 
 const Map = dynamic(() => import('@/components/Map'), { ssr: false });
@@ -26,6 +28,11 @@ export default function DashboardPage() {
   const [threatBuildings, setThreatBuildings] = useState<Record<string, ThreatState['threatLevel']>>({});
   const [locateTrigger, setLocateTrigger] = useState(0);
   const [tipModal, setTipModal] = useState<{ lng: number; lat: number; buildingId?: string } | null>(null);
+  const [buildingPopup, setBuildingPopup] = useState<{ lng: number; lat: number; buildingId: string } | null>(null);
+  const [exitModal, setExitModal] = useState<{ buildingId: string; buildingCenter: { lng: number; lat: number } } | null>(null);
+  const [exitPlacementMode, setExitPlacementMode] = useState(false);
+  const [exitPlacedLocation, setExitPlacedLocation] = useState<{ lng: number; lat: number } | null>(null);
+  const [flyTarget, setFlyTarget] = useState<{ center: [number, number]; zoom: number } | null>(null);
   const [showAuth, setShowAuth] = useState(false);
   const [alertMsg, setAlertMsg] = useState<string | null>(null);
   const [revealed, setRevealed] = useState(false);
@@ -75,7 +82,7 @@ export default function DashboardPage() {
 
   const handleBuildingClick = useCallback((lng: number, lat: number, buildingId: string) => {
     if (!user) { setShowAuth(true); return; }
-    setTipModal({ lng, lat, buildingId });
+    setBuildingPopup({ lng, lat, buildingId });
   }, [user]);
 
   const handleLocate = useCallback(() => {
@@ -95,6 +102,49 @@ export default function DashboardPage() {
     });
     setTimeout(refreshThreats, 3000);
   }, [tipModal, user, refreshThreats]);
+
+  const handleReportFromPopup = useCallback(() => {
+    if (!buildingPopup) return;
+    setBuildingPopup(null);
+    setTipModal({ lng: buildingPopup.lng, lat: buildingPopup.lat, buildingId: buildingPopup.buildingId });
+  }, [buildingPopup]);
+
+  const handleAddExit = useCallback(() => {
+    if (!buildingPopup) return;
+    setExitModal({ buildingId: buildingPopup.buildingId, buildingCenter: { lng: buildingPopup.lng, lat: buildingPopup.lat } });
+    setExitPlacedLocation(null);
+  }, [buildingPopup]);
+
+  const handleEnterPlacement = useCallback(() => {
+    setExitPlacementMode(true);
+  }, []);
+
+  const handlePlacementClick = useCallback((lng: number, lat: number) => {
+    setExitPlacedLocation({ lng, lat });
+    setExitPlacementMode(false);
+  }, []);
+
+  const handleExitSubmit = useCallback(async (data: {
+    buildingId: string;
+    location: { lng: number; lat: number };
+    exitType: ExitType;
+    floor: number;
+    description: string;
+    accessible: boolean;
+  }) => {
+    const res = await fetch('/api/exits', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error('Failed to save exit');
+    setExitModal(null);
+    setExitPlacedLocation(null);
+    // Reopen building popup to show the new exit
+    if (buildingPopup) {
+      setBuildingPopup({ ...buildingPopup });
+    }
+  }, [buildingPopup]);
 
   return (
     <div style={{ position: 'relative', width: '100vw', height: '100vh', background: '#000', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
@@ -119,9 +169,12 @@ export default function DashboardPage() {
             is3D={is3D}
             center={center}
             locateTrigger={locateTrigger}
+            flyTarget={flyTarget}
+            placementMode={exitPlacementMode}
             onReady={() => setRevealed(true)}
             onMapClick={handleMapClick}
             onBuildingClick={handleBuildingClick}
+            onPlacementClick={handlePlacementClick}
           />
           {/* Report button */}
           <button
@@ -140,6 +193,19 @@ export default function DashboardPage() {
           >
             + REPORT
           </button>
+
+          {/* BuildingPopup */}
+          {buildingPopup && !exitPlacementMode && (
+            <BuildingPopup
+              buildingId={buildingPopup.buildingId}
+              lng={buildingPopup.lng}
+              lat={buildingPopup.lat}
+              onClose={() => setBuildingPopup(null)}
+              onAddExit={handleAddExit}
+              onFlyToExit={(exitCenter, zoom) => setFlyTarget({ center: exitCenter, zoom })}
+              onReportHere={handleReportFromPopup}
+            />
+          )}
         </div>
 
         {/* Feed panel */}
@@ -149,11 +215,23 @@ export default function DashboardPage() {
       {tipModal && <TipModal {...tipModal} onClose={() => setTipModal(null)} onSubmit={handleTipSubmit} />}
       {showAuth && <AuthModal onClose={() => setShowAuth(false)} onAuth={u => setUser(u as User)} />}
 
+      {exitModal && !exitPlacementMode && (
+        <ExitModal
+          buildingId={exitModal.buildingId}
+          isPlacementMode={exitPlacementMode}
+          placedLocation={exitPlacedLocation}
+          onEnterPlacement={handleEnterPlacement}
+          onConfirmPlacement={() => {}}
+          onClose={() => { setExitModal(null); setExitPlacedLocation(null); setExitPlacementMode(false); }}
+          onSubmit={handleExitSubmit}
+        />
+      )}
+
       {activeEmergency && (
         <EmergencyOverlay emergency={activeEmergency} visible={emergencyVisible} />
       )}
 
-      {/* Reveal overlay — starts black, fades out once map is idle */}
+      {/* Reveal overlay */}
       <div
         style={{
           position: 'fixed',
