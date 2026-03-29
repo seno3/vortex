@@ -146,7 +146,7 @@ export default function LandingPage() {
           >
             OPEN
           </button>
-          <div style={{ fontSize: '18px', color: 'rgba(255,255,255,0.3)', animation: 'bounce 2s infinite' }}>⌄</div>
+
         </div>
       </div>
 
@@ -178,7 +178,6 @@ export default function LandingPage() {
 
       <style>{`
         @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
-        @keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(6px); } }
         @keyframes pulseDot { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.4); opacity: 0.7; } }
       `}</style>
     </div>
