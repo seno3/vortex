@@ -10,6 +10,7 @@ import TipModal from '@/components/TipModal';
 import AuthModal from '@/components/AuthModal';
 import AlertBanner from '@/components/AlertBanner';
 import BuildingPopup from '@/components/BuildingPopup';
+import FlareBubbles from '@/components/FlareBubbles';
 import ExitModal from '@/components/ExitModal';
 import EmergencyOverlay from '@/components/emergency/EmergencyOverlay';
 
@@ -28,6 +29,7 @@ export default function DashboardPage() {
   const [threatBuildings, setThreatBuildings] = useState<Record<string, ThreatState['threatLevel']>>({});
   const [locateTrigger, setLocateTrigger] = useState(0);
   const [tipModal, setTipModal] = useState<{ lng: number; lat: number; buildingId?: string } | null>(null);
+  const [mapContext, setMapContext] = useState<{ map: any; mapboxGL: any } | null>(null);
   const [buildingPopup, setBuildingPopup] = useState<{ lng: number; lat: number; buildingId: string } | null>(null);
   const [exitModal, setExitModal] = useState<{ buildingId: string; buildingCenter: { lng: number; lat: number } } | null>(null);
   const [exitPlacementMode, setExitPlacementMode] = useState(false);
@@ -175,6 +177,7 @@ export default function DashboardPage() {
             onMapClick={handleMapClick}
             onBuildingClick={handleBuildingClick}
             onPlacementClick={handlePlacementClick}
+            onMapRef={(map, mapboxGL) => setMapContext(map ? { map, mapboxGL } : null)}
           />
           {/* Report button */}
           <button
@@ -194,7 +197,15 @@ export default function DashboardPage() {
             + REPORT
           </button>
 
-          {/* BuildingPopup */}
+          {/* Flare speech bubbles on buildings */}
+          <FlareBubbles
+            mapContext={mapContext}
+            lng={center[0]}
+            lat={center[1]}
+            radius={radius}
+          />
+
+          {/* BuildingPopup — exits management */}
           {buildingPopup && !exitPlacementMode && (
             <BuildingPopup
               buildingId={buildingPopup.buildingId}

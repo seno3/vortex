@@ -16,6 +16,7 @@ interface MapProps {
   onMapClick?: (lng: number, lat: number) => void;
   onBuildingClick?: (lng: number, lat: number, buildingId: string) => void;
   onPlacementClick?: (lng: number, lat: number) => void;
+  onMapRef?: (map: any, mapboxGL: any) => void;
 }
 
 declare global {
@@ -36,6 +37,7 @@ export default function Map({
   onMapClick,
   onBuildingClick,
   onPlacementClick,
+  onMapRef,
 }: MapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
@@ -64,10 +66,12 @@ export default function Map({
   const onPlacementClickRef = useRef(onPlacementClick);
   const placementModeRef = useRef(placementMode);
   const threatBuildingsRef = useRef(threatBuildings);
+  const onMapRefRef = useRef(onMapRef);
   useEffect(() => { onMapClickRef.current = onMapClick; }, [onMapClick]);
   useEffect(() => { onBuildingClickRef.current = onBuildingClick; }, [onBuildingClick]);
   useEffect(() => { onPlacementClickRef.current = onPlacementClick; }, [onPlacementClick]);
   useEffect(() => { onReadyRef.current = onReady; }, [onReady]);
+  useEffect(() => { onMapRefRef.current = onMapRef; }, [onMapRef]);
   useEffect(() => { placementModeRef.current = placementMode; }, [placementMode]);
   useEffect(() => { threatBuildingsRef.current = threatBuildings; }, [threatBuildings]);
 
@@ -194,6 +198,7 @@ export default function Map({
         if (cancelled) return;
         setMapLoaded(true);
         syncCenter();
+        onMapRefRef.current?.(map, mapboxgl.default);
 
         // 3D buildings layer
         const layers = map.getStyle().layers;
@@ -323,6 +328,7 @@ export default function Map({
     return () => {
       cancelled = true;
       exitsSourceReadyRef.current = false;
+      onMapRefRef.current?.(null, null);
       if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current);
       userMarkerRef.current?.remove();
       placementMarkerRef.current?.remove();
