@@ -1,5 +1,6 @@
 import mongoose, { Schema, Document, Model } from 'mongoose';
 import { connectDB } from './mongodb';
+import { updateCredibility } from './users';
 import type { TipCategory, TipUrgency, TipStatus } from '@/types';
 
 export interface ITip extends Document {
@@ -45,6 +46,8 @@ const tipSchema = new Schema<ITip>({
 tipSchema.index({ location: '2dsphere' });
 
 const UPVOTE_CREDIBILITY_DELTA = 2;
+/** Added to the flare author's profile when someone upvotes their flare (capped 0–100 on User). */
+const UPVOTE_AUTHOR_CREDIBILITY_DELTA = 1;
 const MAX_TIP_CREDIBILITY = 100;
 
 function getTipModel(): Model<ITip> {
@@ -82,6 +85,7 @@ export async function upvoteTip(
       updated.credibilityScore = MAX_TIP_CREDIBILITY;
       await updated.save();
     }
+    await updateCredibility(String(updated.userId), UPVOTE_AUTHOR_CREDIBILITY_DELTA);
     const count = updated.upvotedBy?.length ?? 0;
     return { ok: true, credibilityScore: updated.credibilityScore, upvoteCount: count, already: false };
   }

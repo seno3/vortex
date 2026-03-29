@@ -12,7 +12,7 @@ export default function ProfilePage() {
   }, []);
 
   if (!user) return (
-    <div style={{ minHeight: '100vh', background: '#050508', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'ui-monospace, monospace', color: 'rgba(255,255,255,0.3)', fontSize: '12px', letterSpacing: '0.2em' }}>
+    <div style={{ minHeight: '100dvh', maxHeight: '100dvh', overflow: 'auto', background: '#050508', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'ui-monospace, monospace', color: 'rgba(255,255,255,0.3)', fontSize: '12px', letterSpacing: '0.2em' }}>
       NOT SIGNED IN
     </div>
   );
@@ -20,7 +20,7 @@ export default function ProfilePage() {
   const scoreColor = user.credibilityScore >= 70 ? '#4ade80' : user.credibilityScore >= 40 ? '#facc15' : '#ef4444';
 
   return (
-    <div style={{ minHeight: '100vh', background: '#050508', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'ui-monospace, monospace' }}>
+    <div style={{ minHeight: '100dvh', maxHeight: '100dvh', overflow: 'auto', background: '#050508', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'ui-monospace, monospace' }}>
       <div style={{ background: 'rgba(255,255,255,0.06)', backdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '16px', padding: '40px', width: '360px', textAlign: 'center' }}>
         <div style={{ width: '64px', height: '64px', borderRadius: '50%', background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '28px', color: 'rgba(255,255,255,0.8)', margin: '0 auto 16px' }}>
           {user.username[0].toUpperCase()}

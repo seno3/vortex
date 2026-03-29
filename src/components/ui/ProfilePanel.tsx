@@ -11,22 +11,7 @@ interface ProfilePanelProps {
 }
 
 const FONT = 'var(--font-sans, sans-serif)';
-const UNIT_KEY = 'vigil_unit';
 const NOTIF_KEY = 'vigil_notifications';
-
-function useUnit() {
-  const [unit, setUnit] = useState<'mi' | 'km'>('mi');
-  useEffect(() => {
-    const stored = localStorage.getItem(UNIT_KEY);
-    if (stored === 'km' || stored === 'mi') setUnit(stored);
-  }, []);
-  const toggle = () => {
-    const next = unit === 'mi' ? 'km' : 'mi';
-    setUnit(next);
-    localStorage.setItem(UNIT_KEY, next);
-  };
-  return { unit, toggle };
-}
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 
@@ -44,15 +29,6 @@ function IconBell() {
     <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.45)" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
       <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
       <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-    </svg>
-  );
-}
-
-function IconMapPin() {
-  return (
-    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.45)" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" />
-      <circle cx={12} cy={9} r={2.5} />
     </svg>
   );
 }
@@ -132,7 +108,6 @@ function Row({
 // ─── Panel ────────────────────────────────────────────────────────────────────
 
 export default function ProfilePanel({ user, onClose, onSignOut }: ProfilePanelProps) {
-  const { unit, toggle } = useUnit();
   const [closing, setClosing] = useState(false);
   const router = useRouter();
   const [notificationsEnabled, setNotificationsEnabled] = useState(() => {
@@ -246,16 +221,9 @@ export default function ProfilePanel({ user, onClose, onSignOut }: ProfilePanelP
               </div>
             }
           />
-          <Row
-            icon={<IconMapPin />}
-            label="Preferred units"
-            onClick={toggle}
-            right={
-              <span style={{ background: 'rgba(255,255,255,0.08)', padding: '2px 8px', borderRadius: 20, fontSize: 10, fontFamily: 'var(--font-mono, monospace)', color: 'rgba(255,255,255,0.4)' }}>
-                {unit}
-              </span>
-            }
-          />
+        </div>
+
+        <div style={{ padding: 8 }}>
           <Row icon={<IconShield />} label="Privacy" />
           <Row icon={<IconInfo />} label="About Vigil" />
         </div>

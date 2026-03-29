@@ -79,7 +79,7 @@ export default function LandingPage() {
   };
 
   return (
-    <div style={{ position: 'relative', width: '100vw', height: '100vh', background: '#000', overflow: 'hidden', fontFamily: FONT }}>
+    <div style={{ position: 'relative', width: '100%', maxWidth: '100%', height: '100dvh', maxHeight: '100dvh', background: '#000', overflow: 'hidden', fontFamily: FONT, minHeight: 0 }}>
       {/* Map — background drift */}
       <div
         ref={mapContainerRef}

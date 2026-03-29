@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { Map as MapboxMap } from 'mapbox-gl';
 import { forwardGeocodeUrl, reverseGeocodeUrl } from '@/lib/mapboxGeocoding';
 import type { Exit } from '@/types';
 
@@ -22,6 +23,65 @@ interface MapProps {
 declare global {
   interface Window {
     mapboxgl: typeof import('mapbox-gl');
+  }
+}
+
+/** Swapped palette: extrusions use the lighter “road” tone; roads use the darker former building tone. */
+const MAP_BUILDING_EXTRUSION_DEFAULT = '#52576a';
+/** Lighter gray-blue for road lines (swapped palette). */
+const MAP_ROAD_LINE_COLOR = '#7d8fa3';
+
+/** Dark-v11 line layers for streets / paths — set to former building color. */
+function applySwappedRoadLineColors(map: MapboxMap) {
+  const style = map.getStyle();
+  if (!style?.layers) return;
+  for (const layer of style.layers) {
+    if (layer.type !== 'line') continue;
+    const id = layer.id.toLowerCase();
+    if (id.includes('rail') || id.includes('aerialway') || id.includes('ferry') || id.includes('water')) continue;
+    if (
+      !id.includes('road') &&
+      !id.includes('street') &&
+      !id.includes('motorway') &&
+      !id.includes('trunk') &&
+      !id.includes('path') &&
+      !id.includes('primary') &&
+      !id.includes('secondary') &&
+      !id.includes('tertiary') &&
+      !id.includes('residential') &&
+      !id.includes('service') &&
+      !id.includes('track')
+    ) {
+      continue;
+    }
+    try {
+      map.setPaintProperty(layer.id, 'line-color', MAP_ROAD_LINE_COLOR);
+    } catch {
+      /* layer may use line-gradient or other paint */
+    }
+  }
+}
+
+/** Brighter fill + stronger halo on street / building / place labels (Mapbox symbol layers). */
+const LABEL_TEXT_COLOR = '#eef1f6';
+const LABEL_HALO_COLOR = 'rgba(4, 8, 16, 0.92)';
+
+function applyMapLabelReadability(map: MapboxMap) {
+  const style = map.getStyle();
+  if (!style?.layers) return;
+  for (const layer of style.layers) {
+    if (layer.type !== 'symbol') continue;
+    const layout = layer.layout as Record<string, unknown> | undefined;
+    if (layout?.['text-field'] == null) continue;
+    const id = layer.id;
+    try {
+      map.setPaintProperty(id, 'text-color', LABEL_TEXT_COLOR);
+      map.setPaintProperty(id, 'text-halo-color', LABEL_HALO_COLOR);
+      map.setPaintProperty(id, 'text-halo-width', 1.5);
+      map.setPaintProperty(id, 'text-halo-blur', 0.2);
+    } catch {
+      /* data-driven paint or unsupported */
+    }
   }
 }
 
@@ -48,6 +108,8 @@ export default function Map({
   const watchIdRef = useRef<number | null>(null);
   const markerAddedRef = useRef(false);
   const userPosRef = useRef<[number, number] | null>(null);
+  /** Set after map + user marker exist; places dot and adds to map if needed. */
+  const placeUserAtRef = useRef<((lng: number, lat: number) => void) | null>(null);
   const onReadyRef = useRef(onReady);
   const exitsSourceReadyRef = useRef(false);
   const currentExitsRef = useRef<Exit[]>([]);
@@ -178,17 +240,25 @@ export default function Map({
       const userMarker = new mapboxgl.default.Marker({ element: markerEl, anchor: 'center' });
       userMarkerRef.current = userMarker;
 
+      const placeUserAt = (longitude: number, latitude: number) => {
+        userPosRef.current = [longitude, latitude];
+        userMarker.setLngLat([longitude, latitude]);
+        if (!markerAddedRef.current) {
+          userMarker.addTo(map);
+          markerAddedRef.current = true;
+        }
+      };
+      placeUserAtRef.current = placeUserAt;
+
       if ('geolocation' in navigator) {
+        // One-shot fix is often faster than the first watchPosition callback — avoids missing dot.
+        navigator.geolocation.getCurrentPosition(
+          (pos) => placeUserAt(pos.coords.longitude, pos.coords.latitude),
+          () => {},
+          { enableHighAccuracy: true, maximumAge: 10_000 },
+        );
         watchIdRef.current = navigator.geolocation.watchPosition(
-          (pos) => {
-            const { longitude, latitude } = pos.coords;
-            userPosRef.current = [longitude, latitude];
-            userMarker.setLngLat([longitude, latitude]);
-            if (!markerAddedRef.current) {
-              userMarker.addTo(map);
-              markerAddedRef.current = true;
-            }
-          },
+          (pos) => placeUserAt(pos.coords.longitude, pos.coords.latitude),
           () => { /* denied or unavailable */ },
           { enableHighAccuracy: true },
         );
@@ -225,15 +295,17 @@ export default function Map({
                 'case',
                 ['boolean', ['feature-state', 'threatLevel'], false],
                 '#ef4444',
-                '#1a2535',
+                MAP_BUILDING_EXTRUSION_DEFAULT,
               ],
               'fill-extrusion-height': ['interpolate', ['linear'], ['zoom'], 14, 0, 14.05, ['get', 'height']],
               'fill-extrusion-base': ['interpolate', ['linear'], ['zoom'], 14, 0, 14.05, ['get', 'min_height']],
-              'fill-extrusion-opacity': 0.7,
+              'fill-extrusion-opacity': 0.92,
             },
           },
           labelLayerId,
         );
+
+        applySwappedRoadLineColors(map);
 
         // ── Exit GeoJSON source ──────────────────────────────────────────────
         map.addSource('exits', {
@@ -299,6 +371,8 @@ export default function Map({
           },
         });
 
+        applyMapLabelReadability(map);
+
         // Click handler — building, exit, or map
         map.on('click', (e) => {
           // Placement mode intercepts all clicks
@@ -328,6 +402,7 @@ export default function Map({
     return () => {
       cancelled = true;
       exitsSourceReadyRef.current = false;
+      placeUserAtRef.current = null;
       onMapRefRef.current?.(null, null);
       if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current);
       userMarkerRef.current?.remove();
@@ -359,20 +434,27 @@ export default function Map({
     map.once('idle', () => onReadyRef.current?.());
   }, [mapLoaded]);
 
-  // Fly to user's current position on locate trigger
+  // Fly to user's current position on locate trigger; always sync the blue dot (getCurrentPosition path previously skipped the marker).
   useEffect(() => {
     if (!locateTrigger) return;
     const map = mapRef.current;
     if (!map || !mapLoaded) return;
+
+    const fly = (lng: number, lat: number) => {
+      placeUserAtRef.current?.(lng, lat);
+      map.flyTo({ center: [lng, lat], zoom: 15, duration: 1200 });
+    };
+
     if (userPosRef.current) {
-      map.flyTo({ center: userPosRef.current, zoom: 15, duration: 1200 });
-    } else {
-      navigator.geolocation?.getCurrentPosition(
-        (pos) => map.flyTo({ center: [pos.coords.longitude, pos.coords.latitude], zoom: 15, duration: 1200 }),
-        () => {},
-        { enableHighAccuracy: true },
-      );
+      fly(userPosRef.current[0], userPosRef.current[1]);
+      return;
     }
+
+    navigator.geolocation?.getCurrentPosition(
+      (pos) => fly(pos.coords.longitude, pos.coords.latitude),
+      () => {},
+      { enableHighAccuracy: true, maximumAge: 0 },
+    );
   }, [locateTrigger, mapLoaded]);
 
   // Fly to exit location
@@ -423,11 +505,34 @@ export default function Map({
   // This is handled externally via a ref-based API in the parent — no-op here.
 
   return (
-    <div className="relative w-full h-full">
-      <div ref={mapContainerRef} className="w-full h-full" />
+    <div className="relative h-full w-full min-h-0 min-w-0">
+      <div ref={mapContainerRef} className="h-full w-full min-h-0" />
+      {/* Subtle edge blur — minimal strip + light blur so the frame isn’t obvious */}
+      <div className="pointer-events-none absolute inset-0 z-[1] overflow-hidden">
+        {(
+          [
+            { position: { top: 0, left: 0, right: 0, height: 22 }, mask: 'linear-gradient(to bottom, black, transparent)' },
+            { position: { bottom: 0, left: 0, right: 0, height: 22 }, mask: 'linear-gradient(to top, black, transparent)' },
+            { position: { top: 0, bottom: 0, left: 0, width: 18 }, mask: 'linear-gradient(to right, black, transparent)' },
+            { position: { top: 0, bottom: 0, right: 0, width: 18 }, mask: 'linear-gradient(to left, black, transparent)' },
+          ] as const
+        ).map((edge, i) => (
+          <div
+            key={i}
+            style={{
+              position: 'absolute',
+              ...edge.position,
+              backdropFilter: 'blur(2px)',
+              WebkitBackdropFilter: 'blur(2px)',
+              maskImage: edge.mask,
+              WebkitMaskImage: edge.mask,
+            }}
+          />
+        ))}
+      </div>
       {/* Tactical overlay */}
       <div
-        className="absolute inset-0 pointer-events-none"
+        className="pointer-events-none absolute inset-0 z-[2]"
         style={{
           background:
             'linear-gradient(to bottom, rgba(10,14,23,0.15) 0%, transparent 15%, transparent 85%, rgba(10,14,23,0.3) 100%)',

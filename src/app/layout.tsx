@@ -27,8 +27,8 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${ibmPlexMono.variable} ${inter.variable} ${playfairDisplay.variable}`}>
-      <body className="bg-[#0a0e17] text-white antialiased overflow-hidden">{children}</body>
+    <html lang="en" className={`h-full overflow-hidden ${ibmPlexMono.variable} ${inter.variable} ${playfairDisplay.variable}`}>
+      <body className="bg-[#0a0e17] text-white antialiased h-full min-h-0 overflow-hidden">{children}</body>
     </html>
   );
 }
